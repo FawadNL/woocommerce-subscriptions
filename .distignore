@@ -1,0 +1,25 @@
+.distignore
+.editorconfig
+.gitignore
+.travis.yml
+.git/
+.eslintrc
+.eslintignore
+.wordpress-org/
+.turbo/
+.vscode
+.github
+composer.lock
+package-lock.json
+package.json
+webpack.config.js
+phpcs.xml
+pnpm-lock.yaml
+DEVELOPMENT.md
+node_modules/
+
+# build files
+build/
+build-mac.sh
+.wp-env.json
+.nvmrc
