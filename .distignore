@@ -19,7 +19,7 @@ DEVELOPMENT.md
 node_modules/
 
 # build files
-# build/
+build/
 build-mac.sh
 .wp-env.json
 .nvmrc
