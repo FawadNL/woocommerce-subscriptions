@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 PLUGIN_SLUG="$(basename $PWD)"
 PROJECT_PATH=$(pwd)
-BUILD_PATH="${PROJECT_PATH}/build"
+BUILD_PATH="${PROJECT_PATH}/build-zip"
 DEST_PATH="$BUILD_PATH/$PLUGIN_SLUG"
 
 # Function to display progress messages
