@@ -21,5 +21,6 @@ node_modules/
 # build files
 build-zip/
 build-mac.sh
+build-windows.sh
 .wp-env.json
 .nvmrc
