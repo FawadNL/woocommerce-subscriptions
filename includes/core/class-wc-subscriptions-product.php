@@ -1284,6 +1284,8 @@ class WC_Subscriptions_Product {
 	/**
 	 * Check if the current session has an order awaiting payment for a subscription to a specific product line item.
 	 *
+	 * @deprecated 2.1 Use WCS_Limiter::order_awaiting_payment_for_product()
+	 *
 	 * @return bool
 	 **/
 	protected static function order_awaiting_payment_for_product( $product_id ) {
@@ -1329,6 +1331,7 @@ class WC_Subscriptions_Product {
 	/**
 	 * Returns the sign up fee (including tax) by filtering the products price used in
 	 * @see WC_Product::get_price_including_tax( $qty )
+	 * @deprecated 2.2.0
 	 *
 	 * @return string
 	 */
@@ -1346,6 +1349,7 @@ class WC_Subscriptions_Product {
 	/**
 	 * Returns the sign up fee (excluding tax) by filtering the products price used in
 	 * @see WC_Product::get_price_excluding_tax( $qty )
+	 * @deprecated 2.2.0
 	 *
 	 * @return string
 	 */

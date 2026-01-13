@@ -843,10 +843,12 @@ class WC_Subscriptions_Switcher {
 	 * To prorate sign-up fee and recurring amounts correctly when the customer switches a subscription multiple times, keep a record of the
 	 * amount for each on the order item.
 	 *
+	 * @since      2.0
+	 * @deprecated 2.2.0 Use WC_Subscriptions_Switcher::add_order_line_item_meta() instead.
+	 *
 	 * @param int $order_item_id The ID of a WC_Order_Item object.
 	 * @param array $cart_item The cart item's data.
 	 * @param string $cart_item_key The hash used to identify the item in the cart
-	 * @since 2.0
 	 */
 	public static function add_order_item_meta( $order_item_id, $cart_item, $cart_item_key ) {
 
@@ -917,10 +919,12 @@ class WC_Subscriptions_Switcher {
 	 * Subscription items on a new billing schedule are left to be added as new subscriptions, but we also
 	 * want to keep a record of them being a switch, so we do that here.
 	 *
+	 * @since      2.0
+	 * @deprecated 2.2.0 Use WC_Subscriptions_Switcher::add_subscription_line_item_meta() instead.
+	 *
 	 * @param int $item_id The ID of a WC_Order_Item object.
 	 * @param array $cart_item The cart item's data.
 	 * @param string $cart_item_key The hash used to identify the item in the cart
-	 * @since 2.0
 	 */
 	public static function set_subscription_item_meta( $item_id, $cart_item, $cart_item_key ) {
 
