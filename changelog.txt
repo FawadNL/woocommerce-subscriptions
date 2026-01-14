@@ -1,5 +1,10 @@
 *** WooCommerce Subscriptions Changelog ***
 
+2026-01-12 - version 8.3.1
+* Fix: Resolved an issue that was preventing limited subscription renewals.
+* Fix: Resolved a React-error that may occur when loading the spotlight welcome announcement for gifting.
+* Fix: Updated WooCommerce's CSV product importer to correctly update subscription product prices.
+
 2026-01-06 - version 8.3.0
 * Add: Support for ajax add-to-cart flows from the single product page, when upgrading or downgrading subscriptions.
 * Add: Enhanced functionality from the WooCommerce Subscription Downloads plugin has now been integrated directly into WooCommerce Subscriptions.

@@ -2,14 +2,14 @@
 # This file is distributed under the GNU General Public License v3.0.
 msgid ""
 msgstr ""
-"Project-Id-Version: WooCommerce Subscriptions 8.3.0\n"
+"Project-Id-Version: WooCommerce Subscriptions 8.3.1\n"
 "Report-Msgid-Bugs-To: https://woocommerce.com/contact-us\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-01-06T17:54:09+00:00\n"
+"POT-Creation-Date: 2026-01-13T01:06:45+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: woocommerce-subscriptions\n"
@@ -100,14 +100,14 @@ msgid "Report Cache Enabled"
 msgstr ""
 
 #: includes/admin/reports/class-wcs-report-cache-manager.php:327
-#: includes/core/admin/class-wc-subscriptions-admin.php:1749
-#: includes/core/admin/class-wc-subscriptions-admin.php:1818
+#: includes/core/admin/class-wc-subscriptions-admin.php:1751
+#: includes/core/admin/class-wc-subscriptions-admin.php:1820
 #: includes/core/admin/class-wcs-admin-system-status.php:139
 msgid "Yes"
 msgstr ""
 
 #: includes/admin/reports/class-wcs-report-cache-manager.php:327
-#: includes/core/admin/class-wc-subscriptions-admin.php:1749
+#: includes/core/admin/class-wc-subscriptions-admin.php:1751
 #: includes/core/admin/class-wcs-admin-system-status.php:139
 msgid "No"
 msgstr ""
@@ -1693,72 +1693,72 @@ msgstr ""
 msgid "You do not have permission to view those subscriptions."
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:1748
+#: includes/core/admin/class-wc-subscriptions-admin.php:1750
 #: includes/core/admin/class-wcs-admin-system-status.php:137
 msgctxt "label that indicates whether debugging is turned on for the plugin"
 msgid "WCS_DEBUG"
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:1754
+#: includes/core/admin/class-wc-subscriptions-admin.php:1756
 #: includes/core/admin/class-wcs-admin-system-status.php:151
 msgctxt "Live or Staging, Label on WooCommerce -> System Status page"
 msgid "Subscriptions Mode"
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:1755
+#: includes/core/admin/class-wc-subscriptions-admin.php:1757
 #: includes/core/admin/class-wcs-admin-system-status.php:153
 msgctxt "refers to staging site"
 msgid "Staging"
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:1755
+#: includes/core/admin/class-wc-subscriptions-admin.php:1757
 #: includes/core/admin/class-wcs-admin-system-status.php:153
 msgctxt "refers to live site"
 msgid "Live"
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:1785
+#: includes/core/admin/class-wc-subscriptions-admin.php:1787
 msgid "Automatic Recurring Payments"
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:1818
+#: includes/core/admin/class-wc-subscriptions-admin.php:1820
 msgid "Supports automatic renewal payments."
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:1899
+#: includes/core/admin/class-wc-subscriptions-admin.php:1901
 msgid "Subscription items can no longer be edited."
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:1904
+#: includes/core/admin/class-wc-subscriptions-admin.php:1906
 msgid "This subscription is no longer editable because the payment gateway does not allow modification of recurring amounts."
 msgstr ""
 
 #. translators: $1-2: opening and closing tags of a link that takes to Woo marketplace / Stripe product page
-#: includes/core/admin/class-wc-subscriptions-admin.php:1923
+#: includes/core/admin/class-wc-subscriptions-admin.php:1925
 #, php-format
 msgid "No payment gateways capable of processing automatic subscription payments are enabled. If you would like to process automatic payments, we recommend %1$sWooPayments%2$s."
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:1930
+#: includes/core/admin/class-wc-subscriptions-admin.php:1932
 msgid "Recurring Payments"
 msgstr ""
 
 #. translators: placeholders are opening and closing link tags
-#: includes/core/admin/class-wc-subscriptions-admin.php:1938
+#: includes/core/admin/class-wc-subscriptions-admin.php:1940
 #, php-format
 msgid "Payment gateways which don't support automatic recurring payments can be used to process %1$smanual subscription renewal payments%2$s."
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:2059
+#: includes/core/admin/class-wc-subscriptions-admin.php:2061
 msgid "Note that purchasing a subscription still requires an account."
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:2073
+#: includes/core/admin/class-wc-subscriptions-admin.php:2075
 msgid "The product type can not be changed because this product is associated with subscriptions."
 msgstr ""
 
-#: includes/core/admin/class-wc-subscriptions-admin.php:2130
-#: includes/core/admin/class-wc-subscriptions-admin.php:2131
+#: includes/core/admin/class-wc-subscriptions-admin.php:2132
+#: includes/core/admin/class-wc-subscriptions-admin.php:2133
 msgid "Allow subscription customers to create an account during checkout"
 msgstr ""
 
@@ -1925,7 +1925,7 @@ msgstr ""
 #: includes/core/admin/class-wcs-admin-post-types.php:1387
 #: includes/core/admin/class-wcs-admin-post-types.php:1798
 #: includes/core/class-wc-subscriptions-manager.php:2000
-#: includes/core/wcs-user-functions.php:331
+#: includes/core/wcs-user-functions.php:333
 #: templates/myaccount/related-orders.php:83
 msgctxt "an action on a subscription"
 msgid "Cancel"
@@ -2150,7 +2150,7 @@ msgid "Search for a customer&hellip;"
 msgstr ""
 
 #: includes/core/admin/class-wcs-admin-post-types.php:1385
-#: includes/core/wcs-user-functions.php:311
+#: includes/core/wcs-user-functions.php:313
 #: includes/gifting/class-wcsg-recipient-management.php:154
 #: templates/single-product/add-to-cart/subscription.php:39
 #: templates/single-product/add-to-cart/variable-subscription.php:38
@@ -2202,7 +2202,7 @@ msgstr ""
 msgid "All"
 msgstr ""
 
-#: includes/core/admin/class-wcs-admin-product-import-export-manager.php:32
+#: includes/core/admin/class-wcs-admin-product-import-export-manager.php:33
 msgid "Subscription variations"
 msgstr ""
 
@@ -2813,7 +2813,7 @@ msgstr ""
 #. translators: %s: subscription ID.
 #. translators: %s: order number.
 #. translators: placeholder is a subscription ID.
-#: includes/core/class-wc-subscriptions-addresses.php:347
+#: includes/core/class-wc-subscriptions-addresses.php:349
 #: includes/core/class-wc-subscriptions-change-payment-gateway.php:790
 #: includes/core/class-wcs-query.php:102
 #, php-format
@@ -2822,7 +2822,7 @@ msgid "Subscription #%s"
 msgstr ""
 
 #. translators: %s: address type (eg. 'billing' or 'shipping').
-#: includes/core/class-wc-subscriptions-addresses.php:353
+#: includes/core/class-wc-subscriptions-addresses.php:355
 #, php-format
 msgctxt "change billing or shipping address"
 msgid "Change %s address"
@@ -2995,7 +2995,7 @@ msgstr ""
 
 #: includes/core/class-wc-subscriptions-change-payment-gateway.php:234
 #: includes/core/class-wcs-template-loader.php:103
-#: includes/core/wcs-helper-functions.php:301
+#: includes/core/wcs-helper-functions.php:304
 msgid "Invalid Subscription."
 msgstr ""
 
@@ -3710,54 +3710,54 @@ msgid "Order cancelled due to subscription #%d cancellation."
 msgstr ""
 
 #. translators: $1: opening link tag, $2: order number, $3: closing link tag
-#: includes/core/class-wc-subscriptions-order.php:1196
+#: includes/core/class-wc-subscriptions-order.php:1197
 #, php-format
 msgid "Subscription cancelled for refunded order %1$s#%2$s%3$s."
 msgstr ""
 
-#: includes/core/class-wc-subscriptions-order.php:2594
+#: includes/core/class-wc-subscriptions-order.php:2650
 msgctxt "An order type"
 msgid "Original"
 msgstr ""
 
-#: includes/core/class-wc-subscriptions-order.php:2595
+#: includes/core/class-wc-subscriptions-order.php:2651
 msgctxt "An order type"
 msgid "Subscription Parent"
 msgstr ""
 
-#: includes/core/class-wc-subscriptions-order.php:2596
+#: includes/core/class-wc-subscriptions-order.php:2652
 msgctxt "An order type"
 msgid "Subscription Renewal"
 msgstr ""
 
-#: includes/core/class-wc-subscriptions-order.php:2597
+#: includes/core/class-wc-subscriptions-order.php:2653
 msgctxt "An order type"
 msgid "Subscription Resubscribe"
 msgstr ""
 
-#: includes/core/class-wc-subscriptions-order.php:2598
+#: includes/core/class-wc-subscriptions-order.php:2654
 msgctxt "An order type"
 msgid "Subscription Switch"
 msgstr ""
 
-#: includes/core/class-wc-subscriptions-order.php:2599
+#: includes/core/class-wc-subscriptions-order.php:2655
 msgctxt "An order type"
 msgid "Non-subscription"
 msgstr ""
 
-#: includes/core/class-wc-subscriptions-order.php:2608
+#: includes/core/class-wc-subscriptions-order.php:2664
 msgid "All orders types"
 msgstr ""
 
-#: includes/core/class-wc-subscriptions-order.php:2641
+#: includes/core/class-wc-subscriptions-order.php:2697
 msgid "Renewal Order"
 msgstr ""
 
-#: includes/core/class-wc-subscriptions-order.php:2643
+#: includes/core/class-wc-subscriptions-order.php:2699
 msgid "Resubscribe Order"
 msgstr ""
 
-#: includes/core/class-wc-subscriptions-order.php:2645
+#: includes/core/class-wc-subscriptions-order.php:2701
 msgid "Parent Order"
 msgstr ""
 
@@ -3997,27 +3997,27 @@ msgstr ""
 msgid "First payment: %s"
 msgstr ""
 
-#: includes/core/class-wcs-cached-data-manager.php:75
+#: includes/core/class-wcs-cached-data-manager.php:77
 #, php-format
 msgid "Related order caching is now handled by %1$s."
 msgstr ""
 
-#: includes/core/class-wcs-cached-data-manager.php:82
+#: includes/core/class-wcs-cached-data-manager.php:84
 #, php-format
 msgid "Customer subscription caching is now handled by %1$s."
 msgstr ""
 
-#: includes/core/class-wcs-cached-data-manager.php:106
-#: includes/core/class-wcs-cached-data-manager.php:238
+#: includes/core/class-wcs-cached-data-manager.php:108
+#: includes/core/class-wcs-cached-data-manager.php:243
 #, php-format
 msgid "Customer subscription caching is now handled by %1$s and %2$s."
 msgstr ""
 
-#: includes/core/class-wcs-cached-data-manager.php:123
+#: includes/core/class-wcs-cached-data-manager.php:125
 msgid "new related order methods in WCS_Related_Order_Store"
 msgstr ""
 
-#: includes/core/class-wcs-cached-data-manager.php:223
+#: includes/core/class-wcs-cached-data-manager.php:228
 msgid "Weekly"
 msgstr ""
 
@@ -4451,7 +4451,7 @@ msgstr ""
 #. translators: %s: Order date
 #. translators: placeholders are strftime() strings.
 #: includes/core/data-stores/class-wcs-subscription-data-store-cpt.php:275
-#: includes/core/wcs-order-functions.php:321
+#: includes/core/wcs-order-functions.php:324
 msgctxt "Order date parsed by DateTime::format"
 msgid "M d, Y @ h:i A"
 msgstr ""
@@ -6293,7 +6293,7 @@ msgid "MM"
 msgstr ""
 
 #. translators: 1) passed sort order type argument, 2) 'ascending', 3) 'descending'.
-#: includes/core/wcs-helper-functions.php:281
+#: includes/core/wcs-helper-functions.php:284
 #, php-format
 msgid "Invalid sort order type: %1$s. The $sort_order argument must be %2$s or %3$s."
 msgstr ""
@@ -6315,32 +6315,32 @@ msgid "There was an error fetching the new order (%1$s) for subscription %2$d."
 msgstr ""
 
 #. translators: placeholder is a date.
-#: includes/core/wcs-order-functions.php:326
+#: includes/core/wcs-order-functions.php:329
 #, php-format
 msgid "Subscription Renewal Order &ndash; %s"
 msgstr ""
 
 #. translators: placeholder is a date.
-#: includes/core/wcs-order-functions.php:330
+#: includes/core/wcs-order-functions.php:333
 #, php-format
 msgid "Resubscribe Order &ndash; %s"
 msgstr ""
 
-#: includes/core/wcs-order-functions.php:349
+#: includes/core/wcs-order-functions.php:352
 msgid "$type passed to the function was not a string."
 msgstr ""
 
 #. translators: placeholder is an order type.
-#: includes/core/wcs-order-functions.php:354
+#: includes/core/wcs-order-functions.php:357
 #, php-format
 msgid "\"%s\" is not a valid new order type."
 msgstr ""
 
-#: includes/core/wcs-order-functions.php:604
+#: includes/core/wcs-order-functions.php:607
 msgid "Invalid data. No valid subscription / order was passed in."
 msgstr ""
 
-#: includes/core/wcs-order-functions.php:608
+#: includes/core/wcs-order-functions.php:611
 msgid "Invalid data. No valid item id was passed in."
 msgstr ""
 
@@ -6446,7 +6446,7 @@ msgctxt "no trial period"
 msgid "no"
 msgstr ""
 
-#: includes/core/wcs-user-functions.php:320
+#: includes/core/wcs-user-functions.php:322
 #: templates/single-product/add-to-cart/subscription.php:41
 #: templates/single-product/add-to-cart/variable-subscription.php:40
 msgid "Resubscribe"
@@ -6525,12 +6525,12 @@ msgid "Order %s created to record early renewal."
 msgstr ""
 
 #: includes/early-renewal/class-wcs-cart-early-renewal.php:304
-#: includes/early-renewal/class-wcs-cart-early-renewal.php:637
+#: includes/early-renewal/class-wcs-cart-early-renewal.php:644
 #: includes/gifting/class-wcsg-recipient-management.php:161
 msgid "Cancel"
 msgstr ""
 
-#: includes/early-renewal/class-wcs-cart-early-renewal.php:605
+#: includes/early-renewal/class-wcs-cart-early-renewal.php:609
 msgctxt "used in order note as reason for why subscription status changed"
 msgid "Customer requested to renew early:"
 msgstr ""
@@ -7261,7 +7261,7 @@ msgid "Choose a new subscription."
 msgstr ""
 
 #: includes/switching/class-wc-subscriptions-switcher.php:250
-#: includes/switching/class-wc-subscriptions-switcher.php:1265
+#: includes/switching/class-wc-subscriptions-switcher.php:1269
 msgid "Your cart contained an invalid subscription switch request. It has been removed."
 msgid_plural "Your cart contained invalid subscription switch requests. They have been removed."
 msgstr[0] ""
@@ -7380,89 +7380,89 @@ msgid "Between Grouped Subscriptions"
 msgstr ""
 
 #. translators: %s: order number.
-#: includes/switching/class-wc-subscriptions-switcher.php:1199
+#: includes/switching/class-wc-subscriptions-switcher.php:1203
 #, php-format
 msgid "Switch order cancelled due to a new switch order being created #%s."
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:1434
-#: includes/switching/class-wc-subscriptions-switcher.php:1518
+#: includes/switching/class-wc-subscriptions-switcher.php:1438
+#: includes/switching/class-wc-subscriptions-switcher.php:1522
 msgid "The subscription may have been deleted."
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:1442
+#: includes/switching/class-wc-subscriptions-switcher.php:1446
 msgid "You can only switch to a subscription product."
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:1448
+#: includes/switching/class-wc-subscriptions-switcher.php:1452
 msgid "We can not find your old subscription item."
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:1470
+#: includes/switching/class-wc-subscriptions-switcher.php:1474
 msgid "You can not switch to the same subscription."
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:1523
+#: includes/switching/class-wc-subscriptions-switcher.php:1527
 msgid "You can not switch this subscription. It appears you do not own the subscription."
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:1590
+#: includes/switching/class-wc-subscriptions-switcher.php:1594
 msgid "There was an error locating the switch details."
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:1939
+#: includes/switching/class-wc-subscriptions-switcher.php:1943
 msgctxt "a switch type"
 msgid "Downgrade"
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:1942
+#: includes/switching/class-wc-subscriptions-switcher.php:1946
 msgctxt "a switch type"
 msgid "Upgrade"
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:1945
+#: includes/switching/class-wc-subscriptions-switcher.php:1949
 msgctxt "a switch type"
 msgid "Crossgrade"
 msgstr ""
 
 #. translators: %1: product subtotal, %2: HTML span tag, %3: direction (upgrade, downgrade, crossgrade), %4: closing HTML span tag
-#: includes/switching/class-wc-subscriptions-switcher.php:1950
+#: includes/switching/class-wc-subscriptions-switcher.php:1954
 #, php-format
 msgctxt "product subtotal string"
 msgid "%1$s %2$s(%3$s)%4$s"
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:2066
+#: includes/switching/class-wc-subscriptions-switcher.php:2070
 msgid "The original subscription item being switched cannot be found."
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:2068
+#: includes/switching/class-wc-subscriptions-switcher.php:2072
 msgid "The item on the switch order cannot be found."
 msgstr ""
 
 #. translators: 1$: old item, 2$: new item when switching
-#: includes/switching/class-wc-subscriptions-switcher.php:2079
+#: includes/switching/class-wc-subscriptions-switcher.php:2083
 #, php-format
 msgctxt "used in order notes"
 msgid "Customer switched from: %1$s to %2$s."
 msgstr ""
 
 #. translators: %s: new item name.
-#: includes/switching/class-wc-subscriptions-switcher.php:2082
+#: includes/switching/class-wc-subscriptions-switcher.php:2086
 #, php-format
 msgctxt "used in order notes"
 msgid "Customer added %s."
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:2494
+#: includes/switching/class-wc-subscriptions-switcher.php:2498
 msgid "Switch Order"
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:2509
+#: includes/switching/class-wc-subscriptions-switcher.php:2513
 msgid "Switched Subscription"
 msgstr ""
 
-#: includes/switching/class-wc-subscriptions-switcher.php:2696
+#: includes/switching/class-wc-subscriptions-switcher.php:2700
 msgctxt "add to cart button text while switching a subscription"
 msgid "Switch subscription"
 msgstr ""
