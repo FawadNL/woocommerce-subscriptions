@@ -207,7 +207,7 @@ function wcs_maybe_unprefix_key( $key, $prefix = '_' ) {
  * @return string
  */
 function wcs_get_calling_function_name() {
-
+	// phpcs:ignore QITStandard.PHP.DebugCode.DebugFunctionFound -- Use of debug_backtrace() is required and necessary here.
 	$backtrace         = version_compare( phpversion(), '5.4.0', '>=' ) ? debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 3 ) : debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS ); // the 2nd param for debug_backtrace() was added in PHP 5.4
 	$calling_function  = isset( $backtrace[2]['class'] ) ? $backtrace[2]['class'] : '';
 	$calling_function .= isset( $backtrace[2]['type'] ) ? ( ( '->' == $backtrace[2]['type'] ) ? '::' : $backtrace[2]['type'] ) : ''; // Ternary abuses

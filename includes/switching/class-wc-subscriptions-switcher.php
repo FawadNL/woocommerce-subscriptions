@@ -844,7 +844,7 @@ class WC_Subscriptions_Switcher {
 	 * amount for each on the order item.
 	 *
 	 * @since      2.0
-	 * @deprecated 2.2.0 Use WC_Subscriptions_Switcher::add_order_line_item_meta() instead.
+	 * @deprecated 2.2.0 Use WC_Subscriptions_Switcher::add_line_item_meta() instead.
 	 *
 	 * @param int $order_item_id The ID of a WC_Order_Item object.
 	 * @param array $cart_item The cart item's data.
@@ -853,7 +853,7 @@ class WC_Subscriptions_Switcher {
 	public static function add_order_item_meta( $order_item_id, $cart_item, $cart_item_key ) {
 
 		if ( false === wcs_is_woocommerce_pre( '3.0' ) ) {
-			_deprecated_function( __METHOD__, '2.2.0 and WooCommerce 3.0.0', __CLASS__ . '::add_order_line_item_meta( $order_item, $cart_item_key, $cart_item )' );
+			_deprecated_function( __METHOD__, '2.2.0 and WooCommerce 3.0.0', __CLASS__ . '::add_line_item_meta( $order_item, $cart_item_key, $cart_item, $order )' );
 		}
 
 		if ( isset( $cart_item['subscription_switch'] ) ) {
@@ -920,7 +920,7 @@ class WC_Subscriptions_Switcher {
 	 * want to keep a record of them being a switch, so we do that here.
 	 *
 	 * @since      2.0
-	 * @deprecated 2.2.0 Use WC_Subscriptions_Switcher::add_subscription_line_item_meta() instead.
+	 * @deprecated 2.2.0 Use WC_Subscriptions_Switcher::add_line_item_meta() instead.
 	 *
 	 * @param int $item_id The ID of a WC_Order_Item object.
 	 * @param array $cart_item The cart item's data.
@@ -929,7 +929,7 @@ class WC_Subscriptions_Switcher {
 	public static function set_subscription_item_meta( $item_id, $cart_item, $cart_item_key ) {
 
 		if ( ! wcs_is_woocommerce_pre( '3.0' ) ) {
-			_deprecated_function( __METHOD__, '2.2.0', __CLASS__ . '::add_subscription_line_item_meta( $order_item, $cart_item_key, $cart_item )' );
+			_deprecated_function( __METHOD__, '2.2.0', __CLASS__ . '::add_line_item_meta( $order_item, $cart_item_key, $cart_item, $order )' );
 		}
 
 		if ( isset( $cart_item['subscription_switch'] ) ) {
