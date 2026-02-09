@@ -4,6 +4,8 @@ PROJECT_PATH=$(pwd)
 BUILD_PATH="./build-zip"
 DEST_PATH="$BUILD_PATH/$PLUGIN_SLUG"
 
+export PATH="/c/msys64/usr/bin:$PATH"
+
 # Function to display progress messages
 progress_message() {
   local message="$1"
