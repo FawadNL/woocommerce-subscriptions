@@ -132,7 +132,7 @@ class CandidatesListTable extends WP_List_Table {
 	 * @return array<string, array{0:string,1:bool}>
 	 */
 	protected function get_sortable_columns(): array {
-		return array(
+		$columns = array(
 			'subscription_id'      => array( 'subscription_id', false ),
 			'created'              => array( 'created', false ),
 			'status'               => array( 'status', false ),
@@ -142,6 +142,23 @@ class CandidatesListTable extends WP_List_Table {
 			'renewal_order_status' => array( 'renewal_order_status', false ),
 			'last_payment'         => array( 'last_payment', false ),
 		);
+
+		// The All view paginates at the SQL level — only
+		// subscription_id and created map to real SQL orderby
+		// values. All other columns require PHP-side lookups
+		// that only work on the bounded candidate-backed views.
+		if ( 'all' === $this->current_view() ) {
+			unset(
+				$columns['status'],
+				$columns['billing_mode'],
+				$columns['renewal_preference'],
+				$columns['next_payment'],
+				$columns['renewal_order_status'],
+				$columns['last_payment']
+			);
+		}
+
+		return $columns;
 	}
 
 	/**
@@ -463,7 +480,7 @@ class CandidatesListTable extends WP_List_Table {
 			);
 		}
 
-		if ( in_array( $orderby, array( 'subscription_id', 'status', 'billing_mode', 'next_payment', 'renewal_order_status', 'last_payment' ), true ) ) {
+		if ( in_array( $orderby, array( 'subscription_id', 'status', 'billing_mode', 'renewal_preference', 'next_payment', 'renewal_order_status', 'last_payment' ), true ) ) {
 			$items = $this->php_sort_items( $items, $orderby, $order );
 		}
 
@@ -1500,7 +1517,11 @@ class CandidatesListTable extends WP_List_Table {
 
 		if ( '' !== $filters['renewal_preference'] ) {
 			$preference = (string) ( $details['renewal_preference'] ?? '' );
-			if ( $preference !== $filters['renewal_preference'] ) {
+			if ( 'default' === $filters['renewal_preference'] ) {
+				if ( 'opted_out' === $preference ) {
+					return false;
+				}
+			} elseif ( $preference !== $filters['renewal_preference'] ) {
 				return false;
 			}
 		}
@@ -1545,13 +1566,13 @@ class CandidatesListTable extends WP_List_Table {
 	/**
 	 * Renewal preference values currently rendered by the Renewal
 	 * preference pill. 'default' is not a stored value — "no stored
-	 * opt-out note" reads as default — so the dropdown exposes only
-	 * `opted_out` as a filterable case for v1.
+	 * opt-out note" reads as default — so the dropdown exposes both
+	 * `opted_out` and `default` as filterable cases.
 	 *
 	 * @return array<string>
 	 */
 	private function allowed_renewal_preference_values(): array {
-		return array( 'opted_out' );
+		return array( 'opted_out', 'default' );
 	}
 
 	/**
@@ -1684,7 +1705,7 @@ class CandidatesListTable extends WP_List_Table {
 				sprintf(
 					/* translators: %s: localised number of candidate rows checked, e.g. "500". */
 					__(
-						'Filter applied to the first %s candidates. Other matches may exist beyond this set.',
+						'Filter and sort applied to the first %s candidates. Other matches may exist beyond this set.',
 						'woocommerce-subscriptions'
 					),
 					number_format_i18n( self::SIGNAL_PHP_FALLBACK_CAP )
@@ -1771,6 +1792,7 @@ class CandidatesListTable extends WP_List_Table {
 	 */
 	private function renewal_preference_filter_options(): array {
 		return array(
+			'default'   => __( 'Default', 'woocommerce-subscriptions' ),
 			'opted_out' => __( 'Opted out', 'woocommerce-subscriptions' ),
 		);
 	}
@@ -1842,14 +1864,12 @@ class CandidatesListTable extends WP_List_Table {
 				};
 			case 'renewal_preference':
 				return static function ( $a, $b ) use ( $table ) {
-					// Map pill value to a sort key — the column only
-					// ever renders two values (Opted out / Default), so
-					// Default-first-then-Opted-out is the useful ASC
-					// ordering; DESC inverts. Missing key reads as
-					// Default (empty string sorts below 'opted_out').
-					$va = (string) ( $table->details_from( (array) $a )['renewal_preference'] ?? '' );
-					$vb = (string) ( $table->details_from( (array) $b )['renewal_preference'] ?? '' );
-					return strcmp( $va, $vb );
+					// The column renders exactly two values: Opted out
+					// and Default. Normalise raw detail values to match
+					// so the sort groups visually identical rows together.
+					$va = 'opted_out' === ( $table->details_from( (array) $a )['renewal_preference'] ?? '' ) ? 1 : 0;
+					$vb = 'opted_out' === ( $table->details_from( (array) $b )['renewal_preference'] ?? '' ) ? 1 : 0;
+					return $va - $vb;
 				};
 			case 'renewal_order_status':
 				return static function ( $a, $b ) use ( $table ) {

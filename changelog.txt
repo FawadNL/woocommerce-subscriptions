@@ -1,5 +1,8 @@
 *** WooCommerce Subscriptions Changelog ***
 
+2026-05-01 - version 8.7.1
+* Fix: Subscriptions health check — Renewal preference column sorting now groups rows by their displayed value, and a "Default" filter option has been added.
+
 2026-04-30 - version 8.7.0
 * Add: Subscriptions Health Check — a new diagnostic tool under WooCommerce > Status that surfaces subscriptions which may need merchant attention. The initial release includes two views:
     * Supports auto-renewal — subscriptions on manual renewal that have a saved payment token on a gateway capable of automatic renewal.

@@ -2,14 +2,14 @@
 # This file is distributed under the GNU General Public License v3.0.
 msgid ""
 msgstr ""
-"Project-Id-Version: WooCommerce Subscriptions 8.7.0\n"
+"Project-Id-Version: WooCommerce Subscriptions 8.7.1\n"
 "Report-Msgid-Bugs-To: https://woocommerce.com/contact-us\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-04-30T20:36:05+00:00\n"
+"POT-Creation-Date: 2026-05-01T19:52:43+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: woocommerce-subscriptions\n"
@@ -104,14 +104,14 @@ msgstr ""
 #: includes/core/admin/class-wc-subscriptions-admin.php:1750
 #: includes/core/admin/class-wc-subscriptions-admin.php:1819
 #: includes/core/admin/class-wcs-admin-system-status.php:139
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1082
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1099
 msgid "Yes"
 msgstr ""
 
 #: includes/admin/reports/class-wcs-report-cache-manager.php:327
 #: includes/core/admin/class-wc-subscriptions-admin.php:1750
 #: includes/core/admin/class-wcs-admin-system-status.php:139
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1083
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1100
 msgid "No"
 msgstr ""
 
@@ -2206,7 +2206,7 @@ msgid "Subscription with ID %1$d does not exist and could not be updated."
 msgstr ""
 
 #: includes/core/admin/class-wcs-admin-post-types.php:1646
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:178
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:195
 msgid "All"
 msgstr ""
 
@@ -2684,7 +2684,7 @@ msgstr ""
 #. translators: %s: human-readable time diff like "3 days".
 #: includes/core/class-wc-subscription.php:1405
 #: includes/core/wcs-formatting-functions.php:246
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1148
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1165
 #, php-format
 msgid "%s ago"
 msgstr ""
@@ -3929,7 +3929,7 @@ msgid "new related order methods in WCS_Related_Order_Store"
 msgstr ""
 
 #: includes/core/class-wcs-cached-data-manager.php:228
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1026
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1043
 msgid "Weekly"
 msgstr ""
 
@@ -6200,7 +6200,7 @@ msgstr ""
 #. translators: placeholder is human time diff (e.g. "3 weeks")
 #. translators: %s: human-readable time diff like "3 days".
 #: includes/core/wcs-formatting-functions.php:243
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1162
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1179
 #, php-format
 msgid "in %s"
 msgstr ""
@@ -7571,66 +7571,67 @@ msgstr ""
 msgid "Last successful payment"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:185
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:202
 msgid "Supports auto-renewal"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:192
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:209
 msgid "Missing renewals"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:712
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:729
 msgid "No scan results yet. Click 'Run scan now' above to audit your subscriptions, or wait for the scheduled nightly scan."
 msgstr ""
 
 #. translators: %s: human-readable time diff.
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:728
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:745
 #, php-format
 msgid "No subscriptions match your current search or filters. The latest scan completed %s ago."
 msgstr ""
 
 #. translators: %s: human-readable time diff.
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:736
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:753
 #, php-format
 msgid "No subscriptions currently need review. The latest scan completed %s ago."
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:897
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1774
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:914
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1796
 msgid "Opted out"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:907
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:924
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1795
 msgid "Default"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:942
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:959
 msgid "This customer has a payment method on file, so make sure this subscription should be set to manual renewal."
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:949
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1750
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:966
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1771
 msgid "Manual"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:955
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:972
 msgid "Automatic"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1024
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1041
 msgid "Daily"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1028
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1045
 msgid "Monthly"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1030
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1047
 msgid "Yearly"
 msgstr ""
 
 #. translators: %d: number of days in a subscription's billing cycle.
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1039
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1056
 #, php-format
 msgid "Every %d day"
 msgid_plural "Every %d days"
@@ -7638,7 +7639,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #. translators: %d: number of weeks in a subscription's billing cycle.
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1042
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1059
 #, php-format
 msgid "Every %d week"
 msgid_plural "Every %d weeks"
@@ -7646,7 +7647,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #. translators: %d: number of months in a subscription's billing cycle.
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1045
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1062
 #, php-format
 msgid "Every %d month"
 msgid_plural "Every %d months"
@@ -7654,107 +7655,107 @@ msgstr[0] ""
 msgstr[1] ""
 
 #. translators: %d: number of years in a subscription's billing cycle.
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1048
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1065
 #, php-format
 msgid "Every %d year"
 msgid_plural "Every %d years"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1074
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1091
 msgid "Not set"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1080
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1097
 msgid "Token on file:"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1132
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1149
 msgid "There is no scheduled payment date and no renewal order for this subscription."
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1150
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1167
 msgid "The payment date is in the past and there's no status for the renewal order, so the renewal date may need an update."
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1597
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1618
 msgid "All statuses"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1613
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1634
 msgid "All billing modes"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1620
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1641
 msgid "All renewal order statuses"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1627
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1648
 msgid "All renewal preferences"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1633
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1654
 msgid "Filter"
 msgstr ""
 
 #. translators: %s: localised number of candidate rows checked, e.g. "500".
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1686
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1707
 #, php-format
-msgid "Filter applied to the first %s candidates. Other matches may exist beyond this set."
+msgid "Filter and sort applied to the first %s candidates. Other matches may exist beyond this set."
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1735
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1756
 msgid "Active"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1736
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1761
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1757
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1782
 msgid "On hold"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1737
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1758
 msgid "Pending cancellation"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1738
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1759
 msgid "Pending"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1739
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1763
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1760
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1784
 msgid "Cancelled"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1740
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1761
 msgid "Expired"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1749
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1770
 msgid "Auto"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1759
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1780
 msgid "Pending payment"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1760
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1781
 msgid "Processing"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1762
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1783
 msgid "Completed"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1764
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1785
 msgid "Refunded"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1765
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:1786
 msgid "Failed"
 msgstr ""
 
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:2133
-#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:2137
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:2153
+#: src/Internal/HealthCheck/Admin/CandidatesListTable.php:2157
 #: src/Internal/HealthCheck/StatusTab.php:685
 #: src/Internal/HealthCheck/StatusTab.php:689
 msgid "recently"
