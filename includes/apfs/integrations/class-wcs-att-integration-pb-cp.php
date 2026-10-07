@@ -1519,7 +1519,7 @@ class WCS_ATT_Integration_PB_CP {
 					// Remove the line item from subscription but preserve its data in the DB.
 					wcs_update_order_item_type( $bundled_item->get_id(), 'line_item_removed', $subscription->get_id() );
 
-					WCS_Download_Handler::revoke_downloadable_file_permission( $bundled_product_id, $subscription->get_id(), $subscription->get_user_id() );
+					WCS_Download_Handler::revoke_subscription_download_permissions( $bundled_product_id, $subscription );
 
 					// Add order note.
 					$subscription->add_order_note( sprintf( _x( '"%1$s" (Product ID: #%2$d) removal triggered by "%3$s" via the My Account page.', 'used in order note', 'woocommerce-subscriptions' ), wcs_get_line_item_name( $bundled_item ), $bundled_product_id, wcs_get_line_item_name( $item ) ) );

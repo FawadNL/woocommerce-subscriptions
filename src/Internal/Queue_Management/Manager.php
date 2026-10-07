@@ -28,6 +28,11 @@ use WCS_Action_Scheduler;
  * Settings for both features are registered unconditionally so merchants always have a UI to opt in.
  * Each feature's behaviour class is registered only when the merchant has opted into that feature.
  *
+ * The dedicated-queue trio is also taken down as a unit: if {@see Dedicated_Queue} reports that its turn
+ * counter can no longer be persisted, {@see disable_dedicated_processing()} stands the isolator down, detaches
+ * the booster, and switches the merchant setting off, so subscription work falls back to regular queue runs
+ * instead of being excluded from them indefinitely.
+ *
  * The class is inert until {@see setup()} is called. The constructor takes no dependencies.
  *
  * @internal This class may be modified, moved or removed in future releases.
@@ -40,6 +45,25 @@ class Manager {
 	 * and as the discriminator for the runtime enable filter, so this Manager only turns on its own scope.
 	 */
 	public const SCOPE_NAME = 'woocommerce-subscriptions';
+
+	/**
+	 * WC Logger source for the Manager's own entries. The shared plugin log, as used by
+	 * {@see Resolves_Existing_Groups}, because these entries are addressed to the merchant rather than to
+	 * someone debugging one component.
+	 */
+	private const LOG_SOURCE = 'woocommerce-subscriptions';
+
+	/**
+	 * Behaviour classes stood up for the dedicated-queue feature, retained so they can be torn down together.
+	 *
+	 * @var Queue_Isolator|null
+	 */
+	private ?Queue_Isolator $queue_isolator = null;
+
+	/**
+	 * @var Concurrent_Batches_Booster|null
+	 */
+	private ?Concurrent_Batches_Booster $concurrent_batches_booster = null;
 
 	/**
 	 * Wire up settings for both features unconditionally, and stand up each feature's behaviour class only
@@ -97,7 +121,8 @@ class Manager {
 
 	/**
 	 * Build the Dedicated_Queue from current option values and engage its hooks. The instance itself is not
-	 * retained here — once `setup()` is called, the instance stays alive via its bound hook callbacks.
+	 * retained here — once `setup()` is called, the instance stays alive via its bound hook callbacks, and it
+	 * detaches those itself before invoking the persistence-failure callback.
 	 *
 	 * @return void
 	 */
@@ -105,7 +130,10 @@ class Manager {
 		$queue = new Dedicated_Queue(
 			self::SCOPE_NAME,
 			array( WCS_Action_Scheduler::ACTION_GROUP ),
-			( new Settings() )->get_effective_rotation()
+			( new Settings() )->get_effective_rotation(),
+			function (): void {
+				$this->disable_dedicated_processing();
+			}
 		);
 
 		// Dedicated_Queue's enable gate defaults to false. We've already confirmed the merchant has opted
@@ -128,22 +156,63 @@ class Manager {
 	}
 
 	/**
-	 * Stand up the Queue_Isolator with the same subscription group scope as the other features. The instance
-	 * is not retained here — once `setup()` is called, it stays alive via its bound hook callbacks.
+	 * Stand up the Queue_Isolator with the same subscription group scope as the other features.
 	 *
 	 * @return void
 	 */
 	private function setup_queue_isolator(): void {
-		( new Queue_Isolator( array( WCS_Action_Scheduler::ACTION_GROUP ) ) )->setup();
+		$this->queue_isolator = new Queue_Isolator( array( WCS_Action_Scheduler::ACTION_GROUP ) );
+		$this->queue_isolator->setup();
 	}
 
 	/**
-	 * Stand up the Concurrent_Batches_Booster. The instance is not retained here — once `setup()` is called,
-	 * it stays alive via its bound filter callback.
+	 * Stand up the Concurrent_Batches_Booster.
 	 *
 	 * @return void
 	 */
 	private function setup_concurrent_batches_booster(): void {
-		( new Concurrent_Batches_Booster() )->setup();
+		$this->concurrent_batches_booster = new Concurrent_Batches_Booster();
+		$this->concurrent_batches_booster->setup();
+	}
+
+	/**
+	 * Switch the dedicated-queue feature off after its turn counter could not be read or written.
+	 *
+	 * Runs from inside the Dedicated_Queue's before-process-queue callback, after the queue has already stood
+	 * itself down. Two halves:
+	 *
+	 *  - In-memory, unconditional: the isolator stands down (its callback later on the same hook then does
+	 *    nothing, so this run is not isolated), the booster detaches, and the enable filter is removed. This
+	 *    is the part that protects subscription work, and it must not depend on the database.
+	 *  - Persisted, best effort: the merchant setting is turned off so later requests do not stand the trio
+	 *    up again. The write goes to the same database that just failed, so its outcome is checked and the
+	 *    error entry says which of the two happened. An unchanged value counts as success: another runner
+	 *    may have turned the setting off first. That runner's write leaves this request's option cache on
+	 *    'yes', and update_option() returns false on zero changed rows, so a concurrent runner can log the
+	 *    second entry after the setting is already off. The second entry therefore makes no claim about
+	 *    the setting's state.
+	 *
+	 * @return void
+	 */
+	private function disable_dedicated_processing(): void {
+		remove_filter( 'wcs_dedicated_queue_enabled', array( $this, 'filter_enable_for_our_scope' ) );
+
+		if ( null !== $this->queue_isolator ) {
+			$this->queue_isolator->stand_down();
+		}
+
+		if ( null !== $this->concurrent_batches_booster ) {
+			$this->concurrent_batches_booster->teardown();
+		}
+
+		$disabled = update_option( Settings::OPTION_ENABLED, 'no' ) || 'no' === get_option( Settings::OPTION_ENABLED );
+
+		if ( $disabled ) {
+			$message = 'Dedicated processing has been turned off because its turn counter could not be read from or written to the database. Subscription actions will be processed on regular Action Scheduler runs instead. Once the database issue is resolved, the setting can be re-enabled under WooCommerce > Settings > Subscriptions.';
+		} else {
+			$message = 'Dedicated processing stood down for this request because its turn counter could not be read from or written to the database. In the meantime, subscription actions will be processed on regular Action Scheduler runs. This message may repeat until the database recovers or the setting is turned off under WooCommerce > Settings > Subscriptions.';
+		}
+
+		wc_get_logger()->error( $message, array( 'source' => self::LOG_SOURCE ) );
 	}
 }

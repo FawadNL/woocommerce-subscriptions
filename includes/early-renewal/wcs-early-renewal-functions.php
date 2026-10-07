@@ -105,10 +105,26 @@ function wcs_can_user_renew_early( $subscription, $user_id = 0 ) {
 function wcs_get_early_renewal_url( $subscription ) {
 	$subscription_id = is_a( $subscription, 'WC_Subscription' ) ? $subscription->get_id() : absint( $subscription );
 
-	$url = add_query_arg( array(
+	$args = array(
 		'subscription_renewal_early' => $subscription_id,
 		'subscription_renewal'       => 'true',
-	), get_permalink( wc_get_page_id( 'myaccount' ) ) );
+	);
+
+	// Only the request of the subscriber, or of the gift recipient, gets a nonce. A URL built anywhere else - a renewal
+	// reminder email sent in the background, or previewed by a store manager - takes the customer to their subscription
+	// rather than setting up the cart. @see WCS_Cart_Early_Renewal::maybe_setup_cart().
+	$subscription_object = is_a( $subscription, 'WC_Subscription' ) ? $subscription : wcs_get_subscription( $subscription_id );
+	$current_user_id     = get_current_user_id();
+	$is_renewing_user    = $current_user_id && $subscription_object && (
+		$current_user_id === $subscription_object->get_user_id()
+		|| ( class_exists( 'WCS_Gifting' ) && (int) WCS_Gifting::get_recipient_user( $subscription_object ) === $current_user_id )
+	);
+
+	if ( $is_renewing_user ) {
+		$args[ WCS_Cart_Early_Renewal::NONCE_QUERY_ARG ] = wp_create_nonce( WCS_Cart_Early_Renewal::get_nonce_action( $subscription_id ) );
+	}
+
+	$url = add_query_arg( $args, get_permalink( wc_get_page_id( 'myaccount' ) ) );
 
 	/**
 	 * Allow third-parties to filter the early renewal URL.

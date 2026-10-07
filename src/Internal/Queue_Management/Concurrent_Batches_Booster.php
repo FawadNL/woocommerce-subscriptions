@@ -44,6 +44,16 @@ class Concurrent_Batches_Booster {
 	}
 
 	/**
+	 * Reverse {@see setup()} by removing the filter. Action Scheduler's concurrent-batches value is left to its
+	 * default (or whatever other code configures) from the next evaluation on.
+	 *
+	 * @return void
+	 */
+	public function teardown(): void {
+		remove_filter( self::FILTER, array( $this, 'maybe_bump' ), self::PRIORITY );
+	}
+
+	/**
 	 * If the inbound concurrent-batches value is the AS default (1), bump it to 2; otherwise pass through
 	 * unchanged. Non-integer inputs are also passed through — bumping a value we don't recognise risks
 	 * stomping on a third-party convention.

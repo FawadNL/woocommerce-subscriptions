@@ -60,11 +60,11 @@ class WC_Subscription_Downloads_Order {
 					$product_status = version_compare( WC_VERSION, '3.0', '<' ) ? $_product->post->post_status : $_product->get_status();
 
 					if ( 'expired' === $new_status || 'cancelled' === $new_status ) {
-						WCS_Download_Handler::revoke_downloadable_file_permission( $product_id, $subscription_id, $subscription->get_user_id() );
+						WCS_Download_Handler::revoke_subscription_download_permissions( $product_id, $subscription );
 					}
 					// Adds the downloadable files to the subscription.
 					else if ( $_product && $_product->exists() && $_product->is_downloadable() && 'publish' === $product_status ) {
-						WCS_Download_Handler::revoke_downloadable_file_permission( $product_id, $subscription_id, $subscription->get_user_id() );
+						WCS_Download_Handler::revoke_subscription_download_permissions( $product_id, $subscription );
 						$downloads = version_compare( WC_VERSION, '3.0', '<' ) ? $_product->get_files() : $_product->get_downloads();
 
 						foreach ( array_keys( $downloads ) as $download_id ) {
@@ -229,7 +229,7 @@ class WC_Subscription_Downloads_Order {
 
 		// Further, remove all attached downloadable products to the subscription.
 		foreach ( $downloadable_products as $product_id ) {
-			WCS_Download_Handler::revoke_downloadable_file_permission( $product_id, $subscription_id, $subscription->get_user_id() );
+			WCS_Download_Handler::revoke_subscription_download_permissions( $product_id, $subscription );
 		}
 
 		// Re-trigger download permissions. It will automatically add permissions to the new items.

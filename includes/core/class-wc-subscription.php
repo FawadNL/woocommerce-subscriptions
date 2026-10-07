@@ -1734,10 +1734,13 @@ class WC_Subscription extends WC_Order {
 	 *      was paid sometime later.
 	 *        - This can be bypassed using the 'wcs_calculate_next_payment_from_last_payment' filter.
 	 *        - @see https://github.com/woocommerce/woocommerce-subscriptions-preserve-billing-schedule
-	 *   3. Next payment date – Used when the filter above is used and the subscription has a valid next payment date. This preserves the
+	 *   3. Next payment date, kept as is – Used when the last order's dates predate the subscription's start date, so there is no
+	 *      last payment to calculate forward from, and the scheduled next payment is after the start date and still at least 2 hours
+	 *      in the future. The scheduled date is already the next payment date, so no billing interval is added to it.
+	 *   4. Next payment date – Used when the filter above is used and the subscription has a valid next payment date. This preserves the
 	 *      subscriptions current billing date. eg if the subscription's payment date occurs on the 10th of every month, it will continue
 	 *      even if the last payment was received late.
-	 *   4. Subscription start date – Used as a last resort if no valid payment dates exist.
+	 *   5. Subscription start date – Used as a last resort if no valid payment dates exist.
 	 *
 	 * Important notes:
 	 * - If the resulting calculated next payment date is less than 2 hours in the future, it will add an additional billing period
@@ -1772,24 +1775,39 @@ class WC_Subscription extends WC_Order {
 
 		} else {
 
+			$use_scheduled_date = false;
+			$from_timestamp     = 0;
+
 			// The next payment date is {interval} billing periods from the start date, trial end date or last payment date
 			if ( 0 !== $next_payment_time && $next_payment_time < gmdate( 'U' ) && ( ( 0 !== $trial_end_time && 1 >= $this->get_payment_count() ) || WC_Subscriptions_Synchroniser::subscription_contains_synced_product( $this ) ) ) {
 				$from_timestamp = $next_payment_time;
 			} elseif ( $last_payment_time >= $start_time && apply_filters( 'wcs_calculate_next_payment_from_last_payment', true, $this ) ) {
 				$from_timestamp = $last_payment_time;
-			} elseif ( $next_payment_time > $start_time ) { // Use the currently scheduled next payment to preserve synchronisation
+			} elseif ( $last_payment_time < $start_time && $next_payment_time > $start_time && $next_payment_time >= ( time() + 2 * HOUR_IN_SECONDS ) ) {
+				// The last order predates the subscription's start date, so there is no last payment to
+				// calculate forward from, and the scheduled next payment hasn't fallen due yet. That
+				// scheduled date is the next payment date itself; adding a billing interval to it would
+				// return a date one billing period too late. The 2 hour boundary mirrors the default value
+				// of the activation path's 'woocommerce_subscription_activation_next_payment_date_threshold'
+				// filter, so under default settings the two paths agree about the same stored date.
+				$use_scheduled_date = true;
+			} elseif ( $next_payment_time > $start_time ) { // Use the currently scheduled next payment as the base, adding an interval, to preserve the billing schedule
 				$from_timestamp = $next_payment_time;
 			} else {
 				$from_timestamp = $start_time;
 			}
 
-			$next_payment_timestamp = wcs_add_time( $this->get_billing_interval(), $this->get_billing_period(), $from_timestamp, 'offset_site_time' );
+			if ( $use_scheduled_date ) {
+				$next_payment_timestamp = $next_payment_time;
+			} else {
+				$next_payment_timestamp = wcs_add_time( $this->get_billing_interval(), $this->get_billing_period(), $from_timestamp, 'offset_site_time' );
 
-			// Make sure the next payment is more than 2 hours in the future, this ensures changes to the site's timezone because of daylight savings will never cause a 2nd renewal payment to be processed on the same day
-			$i = 1;
-			while ( $next_payment_timestamp < ( current_time( 'timestamp', true ) + 2 * HOUR_IN_SECONDS ) && $i < 3000 ) {
-				$next_payment_timestamp = wcs_add_time( $this->get_billing_interval(), $this->get_billing_period(), $next_payment_timestamp, 'offset_site_time' );
-				$i += 1;
+				// Make sure the next payment is more than 2 hours in the future, this ensures changes to the site's timezone because of daylight savings will never cause a 2nd renewal payment to be processed on the same day
+				$i = 1;
+				while ( $next_payment_timestamp < ( current_time( 'timestamp', true ) + 2 * HOUR_IN_SECONDS ) && $i < 3000 ) {
+					$next_payment_timestamp = wcs_add_time( $this->get_billing_interval(), $this->get_billing_period(), $next_payment_timestamp, 'offset_site_time' );
+					$i += 1;
+				}
 			}
 		}
 
@@ -1970,26 +1988,42 @@ class WC_Subscription extends WC_Order {
 	}
 
 	/**
-	 * Cancel the order and restore the cart (before payment)
+	 * Cancel the subscription.
 	 *
-	 * @param string $note (default: '') Optional note to add
+	 * @deprecated 9.3.0 Use WC_Subscription::maybe_cancel() instead.
+	 *
+	 * @param string $note Optional note to add.
 	 */
 	public function cancel_order( $note = '' ) {
+		wcs_deprecated_function( __METHOD__, '9.3.0', 'WC_Subscription::maybe_cancel()' );
+
+		$this->maybe_cancel( $note );
+	}
+
+	/**
+	 * Cancel the subscription when possible, or schedule its cancellation at the end of the prepaid term.
+	 *
+	 * @since 9.3.0
+	 *
+	 * @param string $note   Optional note to add.
+	 * @param bool   $manual Whether the cancellation was triggered manually.
+	 */
+	public function maybe_cancel( $note = '', $manual = false ) {
 
 		// If the customer hasn't been through the pending cancellation period yet set the subscription to be pending cancellation unless there is a pending renewal order.
 		if ( apply_filters( 'woocommerce_subscription_use_pending_cancel', true ) && $this->calculate_date( 'end_of_prepaid_term' ) > current_time( 'mysql', true ) && ( $this->has_status( 'active' ) || $this->has_status( 'on-hold' ) && ! $this->needs_payment() ) ) {
 
-			$this->update_status( 'pending-cancel', $note );
+			$this->update_status( 'pending-cancel', $note, $manual );
 
 		// If the subscription has already ended or can't be cancelled for some other reason, just record the note.
 		} elseif ( ! $this->can_be_updated_to( 'cancelled' ) ) {
 
-			$this->add_order_note( $note );
+			$this->add_order_note( $note, 0, $manual );
 
 		// Cancel for real if we're already pending cancellation
 		} else {
 
-			$this->update_status( 'cancelled', $note );
+			$this->update_status( 'cancelled', $note, $manual );
 
 		}
 	}

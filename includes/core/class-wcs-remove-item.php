@@ -119,25 +119,32 @@ class WCS_Remove_Item {
 
 						// restore download permissions for this item
 						$subscription = wcs_get_subscription( $subscription->get_id() );
-						$line_items = $subscription->get_items();
-						$line_item  = $line_items[ $item_id ];
-						$_product   = $line_item->get_product();
-						$product_id = wcs_get_canonical_product_id( $line_item );
+						$line_items   = $subscription->get_items();
 
-						if ( $_product && $_product->exists() && $_product->is_downloadable() ) {
+						// If the restored item still can't be read back, put it back to removed rather than leave it restored
+						// without its download permissions, note and 'wcs_user_readded_item' callbacks.
+						if ( isset( $line_items[ $item_id ] ) ) {
+							$line_item  = $line_items[ $item_id ];
+							$_product   = $line_item->get_product();
+							$product_id = wcs_get_canonical_product_id( $line_item );
 
-							$downloads = wcs_get_objects_property( $_product, 'downloads' );
+							if ( $_product && $_product->exists() && $_product->is_downloadable() ) {
 
-							foreach ( array_keys( $downloads ) as $download_id ) {
-								wc_downloadable_file_permission( $download_id, $product_id, $subscription, $line_item['qty'] );
+								$downloads = wcs_get_objects_property( $_product, 'downloads' );
+
+								foreach ( array_keys( $downloads ) as $download_id ) {
+									wc_downloadable_file_permission( $download_id, $product_id, $subscription, $line_item['qty'] );
+								}
 							}
+
+							// translators: 1$: product name, 2$: product id
+							$subscription->add_order_note( sprintf( _x( 'Customer added "%1$s" (Product ID: #%2$d) via the My Account page.', 'used in order note', 'woocommerce-subscriptions' ), wcs_get_line_item_name( $line_item ), $product_id ) );
+
+							do_action( 'wcs_user_readded_item', $line_item, $subscription );
+						} else {
+							wcs_update_order_item_type( $item_id, 'line_item_removed', $subscription->get_id() );
+							wc_add_notice( __( 'Your request to undo your previous action was unsuccessful.', 'woocommerce-subscriptions' ) );
 						}
-
-						// translators: 1$: product name, 2$: product id
-						$subscription->add_order_note( sprintf( _x( 'Customer added "%1$s" (Product ID: #%2$d) via the My Account page.', 'used in order note', 'woocommerce-subscriptions' ), wcs_get_line_item_name( $line_item ), $product_id ) );
-
-						do_action( 'wcs_user_readded_item', $line_item, $subscription );
-
 					} else {
 						wc_add_notice( __( 'Your request to undo your previous action was unsuccessful.', 'woocommerce-subscriptions' ) );
 					}
@@ -151,7 +158,7 @@ class WCS_Remove_Item {
 					$line_item  = $line_items[ $item_id ];
 					$product_id = wcs_get_canonical_product_id( $line_item );
 
-					WCS_Download_Handler::revoke_downloadable_file_permission( $product_id, $subscription->get_id(), $subscription->get_user_id() );
+					WCS_Download_Handler::revoke_subscription_download_permissions( $product_id, $subscription );
 
 					// remove the line item from subscription but preserve its data in the DB
 					wcs_update_order_item_type( $item_id, 'line_item_removed', $subscription->get_id() );
@@ -216,6 +223,11 @@ class WCS_Remove_Item {
 		} elseif ( ! $subscription->payment_method_supports( 'subscription_amount_changes' ) ) {
 
 			wc_add_notice( __( 'The item was not removed because this Subscription\'s payment method does not support removing an item.', 'woocommerce-subscriptions' ) );
+
+		} elseif ( ! $undo_request && ( ! isset( $subscription_items[ $order_item_id ] ) || ! wcs_can_items_be_removed( $subscription ) || ! wcs_can_item_be_removed( $subscription_items[ $order_item_id ], $subscription ) ) ) {
+			// The account templates use these same checks to decide whether to show the remove link. We apply them here so
+			// they are also enforced on the server. The isset() keeps the item lookup safe if the branches above are reordered.
+			wc_add_notice( __( 'That item cannot be removed from your subscription.', 'woocommerce-subscriptions' ), 'error' );
 
 		} else {
 

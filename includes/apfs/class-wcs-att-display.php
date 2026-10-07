@@ -136,10 +136,8 @@ class WCS_ATT_Display {
 		// Remove duplicates if webpack also added these.
 		$script_dependencies = array_unique( $script_dependencies );
 
-		// No 'defer' strategy: the bundle binds its Product Bundles and Composite Products integrations from a
-		// jQuery-ready callback, and a deferred bundle runs after those plugins have already fired the init events it
-		// listens for.
 		wp_register_script( 'wcsatt-frontend', WCS_ATT()->plugin_url() . '/build/apfs-frontend.js', $script_dependencies, $asset_file['version'], true );
+		wp_script_add_data( 'wcsatt-frontend', 'strategy', 'defer' );
 
 		// Localize script with single product parameters. Printed wherever the handle ends up enqueued.
 		$single_product_params = array(

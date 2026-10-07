@@ -89,6 +89,25 @@ class WCS_Cart_Early_Renewal extends WCS_Cart_Renewal {
 	}
 
 	/**
+	 * The query arg an early renewal URL carries its nonce in.
+	 *
+	 * @since 9.3.0
+	 */
+	public const NONCE_QUERY_ARG = 'woocommerce_subscriptions_early_renewal_nonce';
+
+	/**
+	 * Returns the nonce action for a request to renew a subscription early via the cart.
+	 *
+	 * @since 9.3.0
+	 *
+	 * @param int $subscription_id The subscription being renewed early.
+	 * @return string
+	 */
+	public static function get_nonce_action( int $subscription_id ): string {
+		return 'woocommerce_subscriptions_renew_early_' . absint( $subscription_id );
+	}
+
+	/**
 	 * Check if a payment is being made on an early renewal order.
 	 */
 	public function maybe_setup_cart() {
@@ -96,8 +115,19 @@ class WCS_Cart_Early_Renewal extends WCS_Cart_Renewal {
 			return;
 		}
 
-		$subscription = wcs_get_subscription( absint( $_GET['subscription_renewal_early'] ) );
-		$redirect_to  = get_permalink( wc_get_page_id( 'myaccount' ) );
+		$subscription_id = absint( $_GET['subscription_renewal_early'] );
+		$subscription    = wcs_get_subscription( $subscription_id );
+		$nonce           = isset( $_GET[ self::NONCE_QUERY_ARG ] ) ? sanitize_text_field( wp_unslash( $_GET[ self::NONCE_QUERY_ARG ] ) ) : '';
+
+		// Setting up the cart empties it first, so that only happens for a link issued to the customer in their own
+		// session. A link from anywhere else - another site, or a renewal reminder email built in the background -
+		// takes the customer to their subscription instead, where they can choose to renew.
+		if ( ! wp_verify_nonce( $nonce, self::get_nonce_action( $subscription_id ) ) ) {
+			$this->redirect_unverified_request( $subscription );
+			exit;
+		}
+
+		$redirect_to = get_permalink( wc_get_page_id( 'myaccount' ) );
 
 		if ( empty( $subscription ) ) {
 
@@ -126,6 +156,29 @@ class WCS_Cart_Early_Renewal extends WCS_Cart_Renewal {
 			do_action( 'wcs_after_early_renewal_setup_cart_subscription', $subscription );
 
 			$redirect_to = wc_get_checkout_url();
+		}
+
+		wp_safe_redirect( $redirect_to );
+		exit;
+	}
+
+	/**
+	 * Redirects an early renewal request whose nonce didn't verify, leaving the cart alone.
+	 *
+	 * A user who may renew the subscription is taken to it, and told to use "Renew now" if they can renew early. Anyone
+	 * else is taken to their account, and nothing is written to their session.
+	 *
+	 * @param WC_Subscription|false $subscription The subscription the request was for, if it exists.
+	 */
+	private function redirect_unverified_request( $subscription ) {
+		$redirect_to = get_permalink( wc_get_page_id( 'myaccount' ) );
+
+		if ( $subscription && current_user_can( 'subscribe_again', $subscription->get_id() ) ) {
+			$redirect_to = $subscription->get_view_order_url();
+
+			if ( wcs_can_user_renew_early( $subscription ) ) {
+				wc_add_notice( __( 'To renew your subscription early, use the "Renew now" button.', 'woocommerce-subscriptions' ), 'notice' );
+			}
 		}
 
 		wp_safe_redirect( $redirect_to );

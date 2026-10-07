@@ -30,7 +30,7 @@ All classes live under `Automattic\WooCommerce_Subscriptions\Internal\Queue_Mana
 - **`External_Trigger_Settings`** — appends the "Web cron support" checkbox, a read-only URL field, and a "Generate a new URL" affordance into the same section. Generates a token on first enable; handles the admin-post + nonce flow for regeneration.
 
 ### Processing channels
-- **`Dedicated_Queue`** — rotation-based queue scoping. On every *N*th run, sets a `group` claim filter so that run claims only subscription actions. Hooks `action_scheduler_before_process_queue` at priority `100`. Default rotation is `3` (every third run is a focus turn).
+- **`Dedicated_Queue`** — rotation-based queue scoping. On every *N*th run, sets a `group` claim filter so that run claims only subscription actions. Hooks `action_scheduler_before_process_queue` at priority `100`. Default rotation is `3` (every third run is a focus turn). The turn counter lives in a non-autoloaded option that is read and written with direct queries rather than through the Options API, so a persistent object cache serving a stale value cannot freeze the rotation (see "Failsafe" below).
 - **`External_Trigger_Endpoint`** — REST route at `/wp-json/wc/v3/subscriptions/job-queue?wcs_token=<token>`. Accepts `GET`/`POST`/`PUT`. On a valid + non-rate-limited hit, returns `200 { "status": "dispatched" }` immediately and registers a `shutdown` callback that fires `action_scheduler_run_queue` with the subscription `group` filter set. If none of the target action groups exist yet (no subscription action has ever been scheduled under them), it instead returns `200 { "status": "not_dispatched", "hint": "..." }` without registering the shutdown callback and without advancing the rate-limit clock — there is no subscription work to run, and scoping a claim to a non-existent group would make Action Scheduler throw. Token-gated (courtesy, not authentication); rate-limited (default 60s, filterable).
 
 ### Supporting tools
@@ -60,16 +60,26 @@ Three scenarios:
 
 WP-CLI's `--group` / `--exclude-groups` flags populate the same filters, so the same deferral logic applies — no WP-CLI special-casing is needed.
 
+## Failsafe
+
+With the isolator engaged, the turn counter is the only thing standing between subscription actions and "excluded from every run". Two protections keep a broken counter from starving subscription work silently:
+
+- **The counter does not trust the object cache.** `Dedicated_Queue` reads and writes its counter with direct queries against the options table. `get_option()` would serve whatever the persistent object cache holds, and `update_option()` short-circuits when the cache already holds the value being written, so a cache that stops reflecting writes (or keeps a stale `notoptions` entry) could pin the counter below the rotation threshold indefinitely. One indexed query per queue run removes the cache from the decision. A failed write is retried once before it counts, because two overlapping runners (see `Concurrent_Batches_Booster`) can race the same row and a lock error between them is transient.
+- **A counter that cannot be persisted switches the feature off.** If the read query or both write attempts fail, `Dedicated_Queue` stands down: it logs an `error`-level entry with the database error, goes inert for the rest of the process, and invokes the persistence-failure callback `Manager` gave it. `Manager::disable_dedicated_processing()` then stands `Queue_Isolator` down as well (its callback sits later on the same hook, so the run that detected the failure is not isolated either), detaches `Concurrent_Batches_Booster`, and sets the "Dedicated processing" option to `no` so later requests do not stand the trio up again. That option write goes to the database that just failed, so its outcome is checked: the `error`-level entry either says the feature has been turned off and where to re-enable it, or says the setting could not be turned off and the stand-down will repeat on every queue run until the database recovers. Subscription work degrades to regular, priority-ordered queue runs instead of being excluded from them.
+
+Standing down sets a flag rather than removing hook callbacks. Removing a callback from the hook it is running on makes `WP_Hook` skip the next priority bucket, which would drop third-party callbacks on that run.
+
 ## Diagnostics
 
 Log sources, at WC's `debug` level except where noted:
 
 | Source | Emitter | Shapes |
 |---|---|---|
-| `woocommerce-subscriptions-dedicated-queue` | `Dedicated_Queue` | *applied* / *blocked (foreign filter)* / *not yet (counter < rotation)* / *skipped (group absent)* |
+| `woocommerce-subscriptions-dedicated-queue` | `Dedicated_Queue` | *applied* / *blocked (foreign filter)* / *not yet (counter < rotation)* / *skipped (group absent)* / *write retried* / *stood down (counter could not be read/written)* — `error` level |
 | `woocommerce-subscriptions-queue-isolator` | `Queue_Isolator` | *applied* / *deferred (foreign filter)* / *no capable store* / *skipped (group absent)* |
 | `woocommerce-subscriptions-external-trigger` | `External_Trigger_Endpoint` | *dispatched* / *not dispatched (group absent)* / *rate-limited* / *invalid token* / *disabled* |
 | `woocommerce-subscriptions` (shared plugin log) | `Resolves_Existing_Groups` | *group lookup failed (DB error)* — `warning` level |
+| `woocommerce-subscriptions` (shared plugin log) | `Manager` | *dedicated processing turned off* / *stood down but the setting could not be turned off* — `error` level |
 
 Every `Dedicated_Queue` entry is prefixed with `[scope=<colon-joined-groups>]` so multiple co-resident scopes (current or future) can be distinguished. The *blocked* / *deferred* shapes include the offending filter name and its value, so an operator chasing a "feature enabled, no observable effect" report has a breadcrumb. The *skipped (group absent)* / *not dispatched (group absent)* shapes appear when a feature stands down because none of its target groups have a row in the `actionscheduler_groups` table yet — expected on a fresh store, until the first subscription action is scheduled. The `warning`-level *group lookup failed* entry — emitted to the shared `woocommerce-subscriptions` log rather than a queue-specific source — distinguishes a genuine database error in that existence check from the normal first-activation case (both otherwise present as "no groups yet").
 

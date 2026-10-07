@@ -400,7 +400,7 @@ class WC_Subscriptions_Manager {
 
 				try {
 					if ( ! $subscription->has_status( wcs_get_subscription_ended_statuses() ) ) {
-						$subscription->cancel_order();
+						$subscription->maybe_cancel();
 					}
 				} catch ( Exception $e ) {
 					// translators: $1: order number, $2: error message
@@ -693,7 +693,7 @@ class WC_Subscriptions_Manager {
 
 			switch ( $status ) {
 				case 'cancelled':
-					$subscription->cancel_order();
+					$subscription->maybe_cancel();
 					break;
 				case 'active':
 				case 'expired':

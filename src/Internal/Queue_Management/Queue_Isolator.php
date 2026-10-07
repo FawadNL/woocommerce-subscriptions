@@ -56,6 +56,13 @@ class Queue_Isolator {
 	private bool $isolation_applied = false;
 
 	/**
+	 * Set by {@see stand_down()}. Once true, {@see maybe_isolate()} is inert for the rest of the process.
+	 *
+	 * @var bool
+	 */
+	private bool $stood_down = false;
+
+	/**
 	 * @param string[] $groups Groups to isolate from regular queue runs. Typically a one-element array
 	 *                         containing `WCS_Action_Scheduler::ACTION_GROUP`.
 	 */
@@ -85,6 +92,20 @@ class Queue_Isolator {
 	}
 
 	/**
+	 * Stop isolating for the rest of the process without touching the hooks.
+	 *
+	 * Used by {@see Manager} from inside a callback on the same hook this isolator listens to. Removing a
+	 * callback from a hook while it is running makes WP_Hook skip the next priority bucket, so the hooks are
+	 * left registered and {@see maybe_isolate()} checks the flag instead. Cleanup of a filter already
+	 * asserted on the current run is unaffected.
+	 *
+	 * @return void
+	 */
+	public function stand_down(): void {
+		$this->stood_down = true;
+	}
+
+	/**
 	 * Decide whether to isolate subscription work from this run. We apply only when:
 	 *
 	 *  - The store supports the claim-filter API (capability-gated).
@@ -94,6 +115,10 @@ class Queue_Isolator {
 	 * @return void
 	 */
 	public function maybe_isolate(): void {
+		if ( $this->stood_down ) {
+			return;
+		}
+
 		$store = $this->get_capable_store();
 		if ( null === $store ) {
 			$this->log( 'Isolation not applied: active store does not support claim filtering.' );

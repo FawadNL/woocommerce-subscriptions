@@ -388,9 +388,8 @@ class WCS_Admin_Meta_Boxes {
 	/**
 	 * Determines if a renewal order payment can be retried. A renewal order payment can only be retried when:
 	 *  - Order is a renewal order
-	 *  - Order status is failed
+	 *  - Order needs payment (status is Pending or Failed, or another status registered via the woocommerce_valid_order_statuses_for_payment filter) and has a total greater than zero
 	 *  - Order payment method isn't empty
-	 *  - Order total > 0
 	 *  - Subscription/s aren't manual
 	 *  - Subscription payment method supports date changes
 	 *  - Order payment method has_action('woocommerce_scheduled_subscription_payment_..')
@@ -683,32 +682,50 @@ class WCS_Admin_Meta_Boxes {
 			return;
 		}
 
-		foreach ( $item_data['line_subtotal'] as $line_item_id => $new_line_subtotal ) {
-			$line_item = WC_Order_Factory::get_order_item( $line_item_id );
+		/**
+		 * WooCommerce's filter for the line item types the order edit screen renders rows for. Applied here so we
+		 * consider the same items the screen offered, which are the only ones the request can carry values for.
+		 *
+		 * @param string|string[] $item_types The order item types.
+		 *
+		 * phpcs:disable WooCommerce.Commenting.CommentHooks.MissingSinceComment -- WooCommerce owns this filter, so a version of ours would be misleading.
+		 */
+		$item_types = apply_filters( 'woocommerce_admin_order_item_types', 'line_item' );
+		// phpcs:enable WooCommerce.Commenting.CommentHooks.MissingSinceComment
 
-			if ( ! $line_item ) {
+		// Walk the object's own line items and take the posted values by ID, so a request can only ever change the
+		// items of the order or subscription being saved.
+		foreach ( $object->get_items( $item_types ) as $line_item_id => $line_item ) {
+			if ( ! isset( $item_data['line_subtotal'][ $line_item_id ] ) ) {
 				continue;
 			}
 
 			// If this item's subtracted tax data hasn't been repaired, do that now.
 			if ( $line_item->meta_exists( '_subtracted_base_location_tax' ) ) {
-				WC_Subscriptions_Upgrader::repair_subtracted_base_taxes( $line_item->get_id() );
-				$line_item = WC_Order_Factory::get_order_item( $line_item->get_id() );
+				WC_Subscriptions_Upgrader::repair_subtracted_base_taxes( $line_item_id );
+				$line_item = WC_Order_Factory::get_order_item( $line_item_id );
 			}
 
-			if ( ! $line_item->meta_exists( '_subtracted_base_location_taxes' ) ) {
+			if ( ! $line_item || ! $line_item->meta_exists( '_subtracted_base_location_taxes' ) ) {
 				continue;
 			}
 
 			/**
 			 * @var WC_Order_Item_Product $line_item
 			 */
-			$new_line_subtotal           = wc_format_decimal( $new_line_subtotal );
+			$new_line_subtotal           = wc_format_decimal( $item_data['line_subtotal'][ $line_item_id ] );
 			$current_base_location_taxes = $line_item->get_meta( '_subtracted_base_location_taxes' );
-			$old_line_subtotal           = $line_item->get_subtotal();
-			$old_line_quantity           = $line_item->get_quantity();
-			$new_line_quantity           = absint( $item_data['order_item_qty'][ $line_item_id ] );
+			$old_line_subtotal           = (float) $line_item->get_subtotal();
+			$old_line_quantity           = (int) $line_item->get_quantity();
+			$new_line_quantity           = absint( $item_data['order_item_qty'][ $line_item_id ] ?? 0 );
 			$new_base_taxes              = array();
+
+			// A quantity of zero means the item is about to be deleted, an emptied quantity field leaves the item at
+			// zero, and a missing quantity gives us nothing to scale the stored amounts by. In each case there is no
+			// per-unit tax worth recalculating.
+			if ( $new_line_quantity < 1 ) {
+				continue;
+			}
 
 			if ( $line_item->meta_exists( '_subtracted_base_location_rates' ) ) {
 				$base_tax_rates = $line_item->get_meta( '_subtracted_base_location_rates' );
@@ -716,9 +733,14 @@ class WCS_Admin_Meta_Boxes {
 
 				$new_base_taxes = WC_Tax::calc_tax( $product_price, $base_tax_rates, true );
 			} else {
+				// Scaling the stored amounts requires a non-zero previous unit price to scale from.
+				if ( $old_line_quantity < 1 || 0.0 === $old_line_subtotal ) {
+					continue;
+				}
+
 				// Update all the base taxes for the new product subtotal.
 				foreach ( $current_base_location_taxes as $rate_id => $tax_amount ) {
-					$new_base_taxes[ $rate_id ] = ( ( (float) $new_line_subtotal / $new_line_quantity ) / ( (float) $old_line_subtotal / $old_line_quantity ) ) * $tax_amount;
+					$new_base_taxes[ $rate_id ] = ( ( (float) $new_line_subtotal / $new_line_quantity ) / ( $old_line_subtotal / $old_line_quantity ) ) * $tax_amount;
 				}
 			}
 

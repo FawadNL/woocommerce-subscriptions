@@ -22,8 +22,12 @@ class WCS_Renewal_Cart_Stock_Manager {
 	public static function attach_callbacks() {
 		add_action( 'wcs_before_renewal_setup_cart_subscription', array( get_called_class(), 'maybe_adjust_stock_cart' ), 10, 2 );
 		add_action( 'woocommerce_check_cart_items', array( get_called_class(), 'maybe_adjust_stock_checkout' ), 0 );
+		// The Store API validates cart item stock before 'woocommerce_check_cart_items' runs, so the
+		// overrides have to be in place from the moment the cart is loaded for the block checkout.
+		add_action( 'woocommerce_cart_loaded_from_session', array( get_called_class(), 'maybe_adjust_stock_checkout' ), 10 );
 		add_action( 'woocommerce_checkout_create_order', array( get_called_class(), 'remove_filters' ) );
 		add_action( 'woocommerce_check_cart_items', array( get_called_class(), 'remove_filters' ), 20 );
+		add_filter( 'woocommerce_order_hold_stock_minutes', array( get_called_class(), 'maybe_skip_stock_reservation' ), 10, 2 );
 	}
 
 	/**
@@ -69,6 +73,20 @@ class WCS_Renewal_Cart_Stock_Manager {
 			return;
 		}
 
+		if ( static::order_requires_stock_override( $order ) ) {
+			add_filter( 'woocommerce_product_is_in_stock', array( get_called_class(), 'adjust_is_in_stock' ), 10, 2 );
+			add_filter( 'woocommerce_product_backorders_allowed', array( get_called_class(), 'adjust_backorder_status' ), 10, 3 );
+		}
+	}
+
+	/**
+	 * Determines if an order contains a product without enough stock to cover it.
+	 *
+	 * @since 9.3.0
+	 * @param WC_Order $order The order to check.
+	 * @return bool Whether any of the order's products is out of stock or short on stock.
+	 */
+	protected static function order_requires_stock_override( $order ) {
 		foreach ( $order->get_items() as $line_item ) {
 			$product = $line_item->get_product();
 
@@ -76,19 +94,50 @@ class WCS_Renewal_Cart_Stock_Manager {
 				continue;
 			}
 
+			if ( ! $product->is_in_stock() ) {
+				return true;
+			}
+
 			// Use the stock managed product in case we have a variation product which is managed on the variable (parent level)
 			$stock_managed_product = wc_get_product( $product->get_stock_managed_by_id() );
+
+			// A product which doesn't manage stock has no quantity to run short of, and WooCommerce
+			// doesn't reserve stock for one which allows backorders.
+			if ( ! $stock_managed_product || ! $stock_managed_product->managing_stock() || $product->backorders_allowed() ) {
+				continue;
+			}
 
 			// Account for stock which is being held by other unpaid orders.
 			$held_stock     = ( (int) get_option( 'woocommerce_hold_stock_minutes', 0 ) > 0 ) ? wc_get_held_stock_quantity( $product, $order->get_id() ) : 0;
 			$required_stock = wcs_get_total_line_item_product_quantity( $order, $stock_managed_product );
 
-			if ( ! $product->is_in_stock() || ( $required_stock + $held_stock ) > $stock_managed_product->get_stock_quantity() ) {
-				add_filter( 'woocommerce_product_is_in_stock', array( get_called_class(), 'adjust_is_in_stock' ), 10, 2 );
-				add_filter( 'woocommerce_product_backorders_allowed', array( get_called_class(), 'adjust_backorder_status' ), 10, 3 );
-				break;
+			if ( ( $required_stock + $held_stock ) > $stock_managed_product->get_stock_quantity() ) {
+				return true;
 			}
 		}
+
+		return false;
+	}
+
+	/**
+	 * Prevents WooCommerce from reserving stock at checkout for renewal orders which bypass stock validation.
+	 *
+	 * The stock override filters are removed before WooCommerce reserves stock for the order, and
+	 * reserving stock fails for products which aren't in stock. A hold of 0 minutes skips the reservation.
+	 *
+	 * Hooked onto 'woocommerce_order_hold_stock_minutes'.
+	 *
+	 * @since 9.3.0
+	 * @param int      $minutes The number of minutes to hold stock for.
+	 * @param WC_Order $order   The order stock is being reserved for.
+	 * @return int The number of minutes to hold stock for.
+	 */
+	public static function maybe_skip_stock_reservation( $minutes, $order ) {
+		if ( $minutes && $order instanceof WC_Order && wcs_order_contains_renewal( $order ) && static::order_requires_stock_override( $order ) ) {
+			$minutes = 0;
+		}
+
+		return $minutes;
 	}
 
 	/**

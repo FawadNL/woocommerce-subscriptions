@@ -79,16 +79,12 @@ class Subscriptions {
 	private function get_hpos_subscriber_count( bool $active = true ): int {
 		global $wpdb;
 
-		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- property $this->active_subscription_statuses_clause is sanitized.
-		$base_query = $wpdb->prepare(
-			"
-				FROM   %i
-				WHERE  type = 'shop_subscription'
-				       AND customer_id IS NOT NULL
-				       AND status IN ( $this->active_subscription_statuses_clause )
-			",
-			$this->wc_orders_table
-		);
+		$base_query = "
+			FROM   $this->wc_orders_table
+			WHERE  type = 'shop_subscription'
+			       AND customer_id IS NOT NULL
+			       AND status IN ( $this->active_subscription_statuses_clause )
+		";
 
 		if ( $active ) {
 			$query = "
@@ -96,23 +92,19 @@ class Subscriptions {
 				$base_query
 			";
 		} else {
-			$query = $wpdb->prepare(
-				"
-					SELECT COUNT( DISTINCT customer_id )
-					FROM   %i
-					WHERE  type = 'shop_subscription'
-					       AND customer_id IS NOT NULL
-					       AND customer_id NOT IN (
-					           SELECT DISTINCT customer_id
-					           $base_query
-					       )
-				",
-				$this->wc_orders_table
-			);
+			$query = "
+				SELECT COUNT( DISTINCT customer_id )
+				FROM   $this->wc_orders_table
+				WHERE  type = 'shop_subscription'
+				       AND customer_id IS NOT NULL
+				       AND customer_id NOT IN (
+				           SELECT DISTINCT customer_id
+				           $base_query
+				       )
+			";
 		}
-		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table names and the status list are trusted literals; there is no user input.
 		return (int) $wpdb->get_var( $query );
 	}
 
@@ -126,20 +118,15 @@ class Subscriptions {
 	private function get_cpt_subscriber_count( bool $active = true ): int {
 		global $wpdb;
 
-		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- property $this->active_subscription_statuses_clause is sanitized.
-		$base_query = $wpdb->prepare(
-			"
-				FROM   %i AS orders
-				JOIN   %i AS customer ON (
-						   orders.ID = customer.post_id
-						   AND customer.meta_key = '_customer_user'
-					   )
-				WHERE  orders.post_type = 'shop_subscription'
-					   AND orders.post_status IN ( $this->active_subscription_statuses_clause )
-			",
-			$wpdb->posts,
-			$wpdb->postmeta
-		);
+		$base_query = "
+			FROM   $wpdb->posts AS orders
+			JOIN   $wpdb->postmeta AS customer ON (
+					   orders.ID = customer.post_id
+					   AND customer.meta_key = '_customer_user'
+				   )
+			WHERE  orders.post_type = 'shop_subscription'
+				   AND orders.post_status IN ( $this->active_subscription_statuses_clause )
+		";
 
 		if ( $active ) {
 			$query = "
@@ -147,27 +134,22 @@ class Subscriptions {
 				$base_query
 			";
 		} else {
-			$query = $wpdb->prepare(
-				"
-					SELECT COUNT( DISTINCT customer.meta_value ) AS customer_id
-					FROM   %i AS orders
-					JOIN   %i AS customer ON (
-							   orders.ID = customer.post_id
-							   AND customer.meta_key = '_customer_user'
-						   )
-					WHERE  orders.post_type = 'shop_subscription'
-						   AND customer.meta_value NOT IN (
-						       SELECT DISTINCT customer.meta_value
-							   $base_query
-						   )
-				",
-				$wpdb->posts,
-				$wpdb->postmeta
-			);
+			$query = "
+				SELECT COUNT( DISTINCT customer.meta_value ) AS customer_id
+				FROM   $wpdb->posts AS orders
+				JOIN   $wpdb->postmeta AS customer ON (
+						   orders.ID = customer.post_id
+						   AND customer.meta_key = '_customer_user'
+					   )
+				WHERE  orders.post_type = 'shop_subscription'
+					   AND customer.meta_value NOT IN (
+					       SELECT DISTINCT customer.meta_value
+						   $base_query
+					   )
+			";
 		}
-		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table names and the status list are trusted literals; there is no user input.
 		return (int) $wpdb->get_var( $query );
 	}
 
@@ -206,21 +188,17 @@ class Subscriptions {
 
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- property $this->active_subscription_statuses_clause is sanitized.
 		return (int) $wpdb->get_var(
-			$wpdb->prepare(
-				"
-					SELECT    COUNT( 1 ) AS order_count
-					FROM      %i AS orders
-					LEFT JOIN %i AS order_meta ON (
-					              orders.id = order_meta.order_id
-					              AND order_meta.meta_key = '_requires_manual_renewal'
-					          )
-					WHERE     orders.type = 'shop_subscription'
-					          AND orders.status IN ( $this->active_subscription_statuses_clause )
-					          AND order_meta.meta_value $renewal_condition 'true'
-				",
-				$this->wc_orders_table,
-				$this->wc_orders_meta_table
-			)
+			"
+				SELECT    COUNT( 1 ) AS order_count
+				FROM      $this->wc_orders_table AS orders
+				LEFT JOIN $this->wc_orders_meta_table AS order_meta ON (
+				              orders.id = order_meta.order_id
+				              AND order_meta.meta_key = '_requires_manual_renewal'
+				          )
+				WHERE     orders.type = 'shop_subscription'
+				          AND orders.status IN ( $this->active_subscription_statuses_clause )
+				          AND order_meta.meta_value $renewal_condition 'true'
+			"
 		);
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
@@ -238,22 +216,17 @@ class Subscriptions {
 
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- property $this->active_subscription_statuses_clause is sanitized.
 		return (int) $wpdb->get_var(
-			$wpdb->prepare(
-				"
-					SELECT    COUNT( 1 ) AS order_count
-					FROM      %i AS orders
-					LEFT JOIN %i AS order_meta ON (
-					              orders.ID = order_meta.post_id
-					              AND order_meta.meta_key = '_requires_manual_renewal'
-
-					          )
-					WHERE     orders.post_type = 'shop_subscription'
-					          AND orders.post_status IN ( $this->active_subscription_statuses_clause )
-					          AND order_meta.meta_value $renewal_condition 'true'
-				",
-				$wpdb->posts,
-				$wpdb->postmeta
-			)
+			"
+				SELECT    COUNT( 1 ) AS order_count
+				FROM      $wpdb->posts AS orders
+				LEFT JOIN $wpdb->postmeta AS order_meta ON (
+				              orders.ID = order_meta.post_id
+				              AND order_meta.meta_key = '_requires_manual_renewal'
+				          )
+				WHERE     orders.post_type = 'shop_subscription'
+				          AND orders.post_status IN ( $this->active_subscription_statuses_clause )
+				          AND order_meta.meta_value $renewal_condition 'true'
+			"
 		);
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
@@ -300,32 +273,27 @@ class Subscriptions {
 
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- property $this->active_subscription_statuses_clause is sanitized.
 		return $wpdb->get_results(
-			$wpdb->prepare(
-				"
-					SELECT    billing_period.meta_value AS period,
-							  billing_interval.meta_value AS `interval`,
-							  COUNT(*) AS count
-					FROM      %i AS orders
-					LEFT JOIN %i AS billing_period ON (
-								  orders.id = billing_period.order_id
-								  AND billing_period.meta_key = '_billing_period'
-							  )
-					LEFT JOIN %i AS billing_interval ON (
-								  orders.id = billing_interval.order_id
-								  AND billing_interval.meta_key = '_billing_interval'
-							  )
-					WHERE     orders.type = 'shop_subscription'
-					          AND orders.status IN ( $this->active_subscription_statuses_clause )
-					GROUP BY  billing_period.meta_value,
-							  billing_interval.meta_value
-					ORDER BY  count DESC,
-							  billing_period.meta_value ASC,
-							  billing_interval.meta_value DESC
-				",
-				$this->wc_orders_table,
-				$this->wc_orders_meta_table,
-				$this->wc_orders_meta_table
-			)
+			"
+				SELECT    billing_period.meta_value AS period,
+						  billing_interval.meta_value AS `interval`,
+						  COUNT(*) AS count
+				FROM      $this->wc_orders_table AS orders
+				LEFT JOIN $this->wc_orders_meta_table AS billing_period ON (
+							  orders.id = billing_period.order_id
+							  AND billing_period.meta_key = '_billing_period'
+						  )
+				LEFT JOIN $this->wc_orders_meta_table AS billing_interval ON (
+							  orders.id = billing_interval.order_id
+							  AND billing_interval.meta_key = '_billing_interval'
+						  )
+				WHERE     orders.type = 'shop_subscription'
+				          AND orders.status IN ( $this->active_subscription_statuses_clause )
+				GROUP BY  billing_period.meta_value,
+						  billing_interval.meta_value
+				ORDER BY  count DESC,
+						  billing_period.meta_value ASC,
+						  billing_interval.meta_value DESC
+			"
 		);
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
@@ -338,32 +306,27 @@ class Subscriptions {
 
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- property $this->active_subscription_statuses_clause is sanitized.
 		return $wpdb->get_results(
-			$wpdb->prepare(
-				"
-					SELECT    billing_period.meta_value AS period,
-							  billing_interval.meta_value AS `interval`,
-							  COUNT(*) AS count
-					FROM      %i AS orders
-					LEFT JOIN %i AS billing_period ON (
-								  orders.ID = billing_period.post_id
-								  AND billing_period.meta_key = '_billing_period'
-							  )
-					LEFT JOIN %i AS billing_interval ON (
-								  orders.ID = billing_interval.post_id
-								  AND billing_interval.meta_key = '_billing_interval'
-							  )
-					WHERE     orders.post_type = 'shop_subscription'
-					          AND orders.post_status IN ( $this->active_subscription_statuses_clause )
-					GROUP BY  billing_period.meta_value,
-							  billing_interval.meta_value
-					ORDER BY  count DESC,
-							  billing_period.meta_value ASC,
-							  billing_interval.meta_value DESC
-				",
-				$wpdb->posts,
-				$wpdb->postmeta,
-				$wpdb->postmeta
-			)
+			"
+				SELECT    billing_period.meta_value AS period,
+						  billing_interval.meta_value AS `interval`,
+						  COUNT(*) AS count
+				FROM      $wpdb->posts AS orders
+				LEFT JOIN $wpdb->postmeta AS billing_period ON (
+							  orders.ID = billing_period.post_id
+							  AND billing_period.meta_key = '_billing_period'
+						  )
+				LEFT JOIN $wpdb->postmeta AS billing_interval ON (
+							  orders.ID = billing_interval.post_id
+							  AND billing_interval.meta_key = '_billing_interval'
+						  )
+				WHERE     orders.post_type = 'shop_subscription'
+				          AND orders.post_status IN ( $this->active_subscription_statuses_clause )
+				GROUP BY  billing_period.meta_value,
+						  billing_interval.meta_value
+				ORDER BY  count DESC,
+						  billing_period.meta_value ASC,
+						  billing_interval.meta_value DESC
+			"
 		);
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
@@ -417,20 +380,17 @@ class Subscriptions {
 
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- property $this->active_subscription_statuses_clause is sanitized.
 		return $wpdb->get_results(
-			$wpdb->prepare(
-				"
-					SELECT
-						     IFNULL( payment_method, '' ) as payment_method,
-						     SUM( CASE WHEN status IN ( $this->active_subscription_statuses_clause ) THEN 1 ELSE 0 END ) AS active_subscription_count,
-						     SUM( CASE WHEN status NOT IN ( $this->active_subscription_statuses_clause ) THEN 1 ELSE 0 END ) AS inactive_subscription_count
-					FROM     %i
-					WHERE    type = 'shop_subscription'
-					GROUP BY IFNULL(payment_method, '')
-					ORDER BY active_subscription_count DESC,
-					         inactive_subscription_count DESC;
-				",
-				$this->wc_orders_table
-			)
+			"
+				SELECT
+					     IFNULL( payment_method, '' ) as payment_method,
+					     SUM( CASE WHEN status IN ( $this->active_subscription_statuses_clause ) THEN 1 ELSE 0 END ) AS active_subscription_count,
+					     SUM( CASE WHEN status NOT IN ( $this->active_subscription_statuses_clause ) THEN 1 ELSE 0 END ) AS inactive_subscription_count
+				FROM     $this->wc_orders_table
+				WHERE    type = 'shop_subscription'
+				GROUP BY IFNULL(payment_method, '')
+				ORDER BY active_subscription_count DESC,
+				         inactive_subscription_count DESC;
+			"
 		);
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
@@ -443,23 +403,19 @@ class Subscriptions {
 
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- property $this->active_subscription_statuses_clause is sanitized.
 		return $wpdb->get_results(
-			$wpdb->prepare(
-				"
-					SELECT
-						      IFNULL(order_meta.meta_value, '') AS payment_method,
-						      SUM( CASE WHEN orders.post_status IN ( $this->active_subscription_statuses_clause ) THEN 1 ELSE 0 END ) AS active_subscription_count,
-						      SUM( CASE WHEN orders.post_status NOT IN ( $this->active_subscription_statuses_clause ) THEN 1 ELSE 0 END ) AS inactive_subscription_count
-					FROM      %i AS orders
-					LEFT JOIN %i AS order_meta ON orders.ID = order_meta.post_id
-						 AND  order_meta.meta_key = '_payment_method'
-					WHERE     orders.post_type = 'shop_subscription'
-					GROUP BY  IFNULL(order_meta.meta_value, '')
-					ORDER BY  active_subscription_count DESC,
-					          inactive_subscription_count DESC;
-				",
-				$wpdb->posts,
-				$wpdb->postmeta
-			)
+			"
+				SELECT
+					      IFNULL(order_meta.meta_value, '') AS payment_method,
+					      SUM( CASE WHEN orders.post_status IN ( $this->active_subscription_statuses_clause ) THEN 1 ELSE 0 END ) AS active_subscription_count,
+					      SUM( CASE WHEN orders.post_status NOT IN ( $this->active_subscription_statuses_clause ) THEN 1 ELSE 0 END ) AS inactive_subscription_count
+				FROM      $wpdb->posts AS orders
+				LEFT JOIN $wpdb->postmeta AS order_meta ON orders.ID = order_meta.post_id
+					 AND  order_meta.meta_key = '_payment_method'
+				WHERE     orders.post_type = 'shop_subscription'
+				GROUP BY  IFNULL(order_meta.meta_value, '')
+				ORDER BY  active_subscription_count DESC,
+				          inactive_subscription_count DESC;
+			"
 		);
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
@@ -515,20 +471,18 @@ class Subscriptions {
 	private function get_hpos_gifted_subscriptions_count(): int {
 		global $wpdb;
 
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table names are trusted literals.
 		$count = $wpdb->get_var(
-			$wpdb->prepare(
-				"
-					SELECT COUNT(DISTINCT orders.id)
-					FROM %i AS orders
-					INNER JOIN %i AS orders_meta ON (orders.id = orders_meta.order_id)
-					WHERE orders.type = 'shop_subscription'
-					AND orders.status NOT IN ( 'auto-draft', 'trash' )
-					AND orders_meta.meta_key = '_recipient_user'
-				",
-				$this->wc_orders_table,
-				$this->wc_orders_meta_table
-			)
+			"
+				SELECT COUNT(DISTINCT orders.id)
+				FROM $this->wc_orders_table AS orders
+				INNER JOIN $this->wc_orders_meta_table AS orders_meta ON (orders.id = orders_meta.order_id)
+				WHERE orders.type = 'shop_subscription'
+				AND orders.status NOT IN ( 'auto-draft', 'trash' )
+				AND orders_meta.meta_key = '_recipient_user'
+			"
 		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		return absint( $count );
 	}
@@ -542,18 +496,14 @@ class Subscriptions {
 		global $wpdb;
 
 		$count = $wpdb->get_var(
-			$wpdb->prepare(
-				"
-					SELECT COUNT(DISTINCT posts.ID)
-					FROM %i AS posts
-					INNER JOIN %i AS posts_meta ON (posts.ID = posts_meta.post_id)
-					WHERE posts.post_type = 'shop_subscription'
-					AND posts.post_status NOT IN ( 'auto-draft', 'trash' )
-					AND posts_meta.meta_key = '_recipient_user'
-				",
-				$wpdb->posts,
-				$wpdb->postmeta,
-			)
+			"
+				SELECT COUNT(DISTINCT posts.ID)
+				FROM $wpdb->posts AS posts
+				INNER JOIN $wpdb->postmeta AS posts_meta ON (posts.ID = posts_meta.post_id)
+				WHERE posts.post_type = 'shop_subscription'
+				AND posts.post_status NOT IN ( 'auto-draft', 'trash' )
+				AND posts_meta.meta_key = '_recipient_user'
+			"
 		);
 
 		return absint( $count );

@@ -542,7 +542,7 @@ class WCS_PayPal_Standard_IPN_Handler extends WC_Gateway_Paypal_IPN_Handler {
 
 				} else {
 
-					$subscription->cancel_order( __( 'IPN subscription cancelled.', 'woocommerce-subscriptions' ) );
+					$subscription->maybe_cancel( __( 'IPN subscription cancelled.', 'woocommerce-subscriptions' ) );
 
 					WC_Gateway_Paypal::log( 'IPN subscription cancelled for subscription ' . $subscription->get_id() );
 

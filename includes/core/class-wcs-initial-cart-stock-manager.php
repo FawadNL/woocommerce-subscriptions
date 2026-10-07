@@ -26,6 +26,13 @@ class WCS_Initial_Cart_Stock_Manager extends WCS_Renewal_Cart_Stock_Manager {
 		// The parent class attaches a filter not needed for initial carts. So we remove it and attach the parent order equivalent.
 		remove_action( 'wcs_before_renewal_setup_cart_subscription', 'WCS_Renewal_Cart_Stock_Manager::maybe_adjust_stock_cart', 10 );
 		add_action( 'wcs_before_parent_order_setup_cart', array( get_called_class(), 'maybe_adjust_stock_cart' ), 10, 2 );
+
+		// Attaching the overrides at cart load is for renewal carts on the block checkout; initial
+		// carts keep the later attach point they have always used.
+		remove_action( 'woocommerce_cart_loaded_from_session', array( get_called_class(), 'maybe_adjust_stock_checkout' ), 10 );
+
+		// Skipping the checkout stock reservation only applies to renewals, and only when renewal stock validation is turned off.
+		remove_filter( 'woocommerce_order_hold_stock_minutes', array( get_called_class(), 'maybe_skip_stock_reservation' ), 10 );
 	}
 
 	/**

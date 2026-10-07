@@ -111,8 +111,16 @@ class WC_Subscriptions_Cart_Validator {
 			return $cart;
 		}
 
-		if ( ! WC_Subscriptions_Cart::cart_contains_subscription() && ! wcs_cart_contains_renewal() ) {
+		$cart_contains_renewal = wcs_cart_contains_renewal();
+
+		if ( ! WC_Subscriptions_Cart::cart_contains_subscription() && ! $cart_contains_renewal ) {
 			return $cart;
+		}
+
+		// A renewal and a plain item for the same product are both subscription items for one product, so the
+		// loop below lets them through (e.g. a saved renewal cart merged with a guest cart on login).
+		if ( $cart_contains_renewal ) {
+			self::reconcile_same_product_duplicates( $cart );
 		}
 
 		// Pre-compute unique subscription product IDs using product objects so that products
@@ -364,9 +372,12 @@ class WC_Subscriptions_Cart_Validator {
 
 	/**
 	 * Reconciles the cart when it contains both a control item (resubscribe or renewal) and a
-	 * plain item for the same limited subscription product. The plain duplicate is removed and
-	 * the control item is preserved. Mirrors the notice/redirect pattern used by
-	 * `validate_cart_contents_for_mixed_checkout()` for its mixed-checkout-off branch.
+	 * plain item for the same subscription product - limited products only for resubscribes, any
+	 * product for renewals. The plain duplicate is removed and the control item is preserved.
+	 *
+	 * Called from `validate_cart_contents_for_mixed_checkout()` in two places: for every cart when
+	 * mixed checkout is on, and only for carts containing a renewal when it is off (resubscribe
+	 * duplicates are then left to `validate_subscription_limits()`).
 	 *
 	 * Switch and initial-payment items are intentionally NOT treated as Layer 2 reconciliation
 	 * triggers - those flows are actively in progress and the customer has chosen them
@@ -396,9 +407,10 @@ class WC_Subscriptions_Cart_Validator {
 			}
 
 			// Mixed checkout legitimately allows multiple line items for unlimited subscription
-			// products. Only reconcile (i.e. remove the plain duplicate) when the product is
-			// limited. This mirrors the per-product nature of the limit setting.
-			if ( ! self::is_limited_subscription_product( $group_id ) ) {
+			// products, so a resubscribe duplicate is only reconciled when the product is limited.
+			// A renewal duplicate always is: the renewal order is rebuilt from the cart, so the
+			// plain line would be charged on it without creating a subscription.
+			if ( empty( $group['renewal'] ) && ! self::is_limited_subscription_product( $group_id ) ) {
 				continue;
 			}
 

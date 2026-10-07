@@ -31,7 +31,6 @@ class WC_Subscriptions_Plugin extends WC_Subscriptions_Core_Plugin {
 
 		( new \Automattic\WooCommerce_Subscriptions\Internal\HealthCheck\Bootstrap() )->register();
 		( new Queue_Management() )->setup();
-		\Automattic\WooCommerce_Subscriptions\Internal\Abilities\Abilities_Registrar::init();
 		WCS_Customer_Suspension_Manager::init();
 		WCS_Drip_Downloads_Manager::init();
 		WCS_Zero_Initial_Payment_Checkout_Manager::init();
@@ -64,6 +63,7 @@ class WC_Subscriptions_Plugin extends WC_Subscriptions_Core_Plugin {
 		add_action( 'plugins_loaded', array( $this, 'init_apfs' ) );
 		add_action( 'plugins_loaded', array( $this, 'init_gifting' ) );
 		add_action( 'plugins_loaded', array( $this, 'init_downloads' ) );
+		add_action( 'plugins_loaded', array( \Automattic\WooCommerce_Subscriptions\Internal\Abilities\Abilities_Registrar::class, 'init' ), 100 );
 		add_action( 'admin_notices', array( WC_Subscription_Downloads_Settings::class, 'add_notice_about_bundled_feature' ) );
 	}
 

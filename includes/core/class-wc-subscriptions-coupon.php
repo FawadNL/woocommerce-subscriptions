@@ -61,6 +61,12 @@ class WC_Subscriptions_Coupon {
 		'renewal_percent' => 1,
 	);
 
+	/** @var array|null One-use context for the next core discount calculation. */
+	private static $renewal_subtotal_calculation;
+
+	/** @var stdClass|null Subtotals owned by one live core discount calculation. */
+	private static $renewal_subtotal_cache;
+
 	/**
 	 * Set up the class, including it's hooks & filters, when the file is loaded.
 	 *
@@ -94,6 +100,7 @@ class WC_Subscriptions_Coupon {
 
 		add_filter( 'woocommerce_coupon_is_valid_for_product', array( __CLASS__, 'validate_subscription_coupon_for_product' ), 10, 3 );
 		add_filter( 'woocommerce_coupon_get_apply_quantity', array( __CLASS__, 'override_applied_quantity_for_recurring_carts' ), 10, 3 );
+		add_filter( 'woocommerce_coupon_get_apply_quantity', array( __CLASS__, 'prepare_renewal_subtotal_calculation' ), 10, 4 );
 	}
 
 	/**
@@ -167,6 +174,15 @@ class WC_Subscriptions_Coupon {
 	 * @return float the discount amount which applies to the cart item
 	 */
 	public static function get_discount_amount_for_cart_item( $cart_item, $discount, $discounting_amount, $single, $coupon ) {
+		$calculation                        = self::$renewal_subtotal_calculation;
+		self::$renewal_subtotal_calculation = null;
+		// A caught quantity-filter exception can leave an unconsumed token and hook
+		// context. Direct or nested quantity calls must use fresh, uncached values.
+		if ( ! $calculation || $calculation['coupon']->get() !== $coupon || ! isset( $cart_item['key'] ) || $cart_item['key'] !== $calculation['item_key']
+			|| ! doing_filter( 'woocommerce_coupon_get_discount_amount' ) || doing_filter( 'woocommerce_coupon_get_apply_quantity' )
+		) {
+			$calculation = null;
+		}
 
 		$coupon_type = wcs_get_coupon_property( $coupon, 'discount_type' );
 
@@ -296,7 +312,7 @@ class WC_Subscriptions_Coupon {
 		} elseif ( $apply_renewal_cart_coupon ) {
 
 			$coupon_code      = wcs_get_coupon_property( $coupon, 'code' );
-			$renewal_subtotal = self::get_renewal_subtotal( $coupon_code );
+			$renewal_subtotal = self::get_renewal_subtotal( $coupon_code, $calculation );
 
 			if ( is_numeric( $renewal_subtotal ) && $renewal_subtotal > 0 ) {
 				/**
@@ -612,22 +628,122 @@ class WC_Subscriptions_Coupon {
 	}
 
 	/**
+	 * Identify the core calculation immediately before it allocates a renewal discount.
+	 *
+	 * WC_Cart_Totals creates a fresh WC_Discounts instance after calculating every
+	 * line's subtotal. Its identity bounds reuse without relying on an after-totals
+	 * action, which may never run if a callback throws. Plain WC_Discounts callers
+	 * do not supply calculated subtotal properties and retain uncached behavior.
+	 * Classic and Store API totals share this financial policy regardless of cart context.
+	 *
+	 * @param mixed $quantity  Unchanged quantity supplied by the filter.
+	 * @param mixed $item      Core calculated item.
+	 * @param mixed $coupon    Coupon being applied.
+	 * @param mixed $discounts Core discount calculation.
+	 * @return mixed Unchanged quantity.
+	 * @since 9.3.0
+	 */
+	public static function prepare_renewal_subtotal_calculation( $quantity, $item, $coupon, $discounts ) {
+		self::$renewal_subtotal_calculation = null;
+		if ( ! $discounts instanceof WC_Discounts || ! $coupon instanceof WC_Coupon || 'renewal_cart' !== $coupon->get_discount_type()
+			|| ! WC()->cart instanceof WC_Cart || $discounts->get_object() !== WC()->cart
+			|| ! is_object( $item ) || ! isset( $item->key, $item->subtotal, $item->subtotal_taxes )
+		) {
+			return $quantity;
+		}
+
+		self::$renewal_subtotal_calculation = array(
+			'discounts'  => WeakReference::create( $discounts ),
+			'coupon'     => WeakReference::create( $coupon ),
+			'item_key'   => $item->key,
+			'generation' => did_action( 'woocommerce_before_calculate_totals' ),
+		);
+
+		return $quantity;
+	}
+
+	/**
+	 * Get the cache for one live calculation, or disable reuse for a direct call.
+	 *
+	 * A nested calculation replaces the cache rather than restoring possibly stale
+	 * outer values. Weak references never prolong an interrupted calculation.
+	 *
+	 * @param array|null $calculation One-use allocation context.
+	 * @return stdClass|null
+	 */
+	private static function get_renewal_subtotal_cache( $calculation ) {
+		$discounts = $calculation ? $calculation['discounts']->get() : null;
+		if ( ! $discounts instanceof WC_Discounts || ! WC()->cart instanceof WC_Cart || ! WC()->session
+			|| $discounts->get_object() !== WC()->cart
+			|| did_action( 'woocommerce_before_calculate_totals' ) !== $calculation['generation']
+		) {
+			self::$renewal_subtotal_cache = null;
+			return null;
+		}
+
+		$coupons            = WC()->session->get( 'wcs_renewal_coupons' );
+		$prices_include_tax = wc_prices_include_tax();
+		$cache              = self::$renewal_subtotal_cache;
+		if ( ! $cache || $cache->discounts->get() !== $discounts || $cache->generation !== $calculation['generation']
+			|| $cache->coupons !== $coupons || $cache->prices_include_tax !== $prices_include_tax
+		) {
+			$cache                        = (object) array(
+				'discounts'          => $calculation['discounts'],
+				'generation'         => $calculation['generation'],
+				'coupons'            => $coupons,
+				'prices_include_tax' => $prices_include_tax,
+				'orders'             => array(),
+				'order_subtotals'    => array(),
+				'code_subtotals'     => array(),
+			);
+			self::$renewal_subtotal_cache = $cache;
+		}
+
+		return $cache;
+	}
+
+	/**
 	 * Get subtotals for a renewal subscription so that our pseudo renewal_cart discounts can be applied correctly even if other items have been added to the cart
 	 *
-	 * The subtotal is returned in the same tax basis as the renewal cart item prices primed by
-	 * WCS_Cart_Renewal::get_cart_item_from_session(): tax inclusive when the renewal order's prices
-	 * include tax, tax exclusive otherwise. Keeping both sides on the same basis means the per-item
-	 * discount shares calculated against this subtotal sum to exactly 1.
+	 * The subtotal is returned in the stored renewal coupon amount's tax basis. A supported ordinary
+	 * renewal uses the current store's price-entry mode. Classic and Store API may use complete current calculated
+	 * lines; legacy and unsafe contexts use persisted order values in the applicable price basis.
+	 * Current-mode and current-line overrides require exactly one order matching the coupon code.
+	 * Matched line amounts and this denominator must share a tax basis. Mixing bases distorts each
+	 * line's proportional share of the recorded discount, even before eligibility rules or caps apply.
 	 *
-	 * @param  string $code coupon code
+	 * @param string     $code        Coupon code.
+	 * @param array|null $calculation One-use core allocation context, absent for direct callers.
 	 * @return float|false The renewal order subtotal, or false when it cannot be determined: the
 	 *                     session has no renewal coupons, the code is not among them, or the
 	 *                     matched renewal order could not be loaded.
 	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v2.0.10
 	 * @since 9.2.0 Returns the subtotal in the renewal order's price basis instead of always tax
 	 *              exclusive, and false (instead of 0) when the subtotal cannot be determined.
+	 * @since 9.3.0 Uses the current price basis for ordinary payable renewals and reuses complete
+	 *              denominator validation within one core totals calculation.
 	 */
-	private static function get_renewal_subtotal( $code ) {
+	private static function get_renewal_subtotal( $code, $calculation = null ) {
+		$cache = self::get_renewal_subtotal_cache( $calculation );
+		if ( $cache && array_key_exists( $code, $cache->code_subtotals ) ) {
+			return $cache->code_subtotals[ $code ];
+		}
+
+		$subtotal = self::calculate_renewal_subtotal( $code, $cache );
+		if ( $cache ) {
+			$cache->code_subtotals[ $code ] = $subtotal;
+		}
+		return $subtotal;
+	}
+
+	/**
+	 * Resolve a coupon's complete order denominator, optionally sharing order reads.
+	 *
+	 * @param string        $code  Coupon code.
+	 * @param stdClass|null $cache Cache owned by this calculation only.
+	 * @return float|false
+	 */
+	private static function calculate_renewal_subtotal( $code, $cache ) {
 
 		$renewal_coupons = WC()->session->get( 'wcs_renewal_coupons' );
 
@@ -639,6 +755,8 @@ class WC_Subscriptions_Coupon {
 		$subtotal         = 0;
 		$matched_order_id = null;
 		$order_loaded     = false;
+		$loaded_order     = null;
+		$matched_orders   = 0;
 
 		foreach ( $renewal_coupons as $order_id => $coupons ) {
 
@@ -647,10 +765,15 @@ class WC_Subscriptions_Coupon {
 				if ( $coupon_code == $code ) {
 
 					$matched_order_id = $order_id;
-					$order            = wc_get_order( $order_id );
+					++$matched_orders;
+					$order = $cache && array_key_exists( $order_id, $cache->orders ) ? $cache->orders[ $order_id ] : wc_get_order( $order_id );
+					if ( $cache ) {
+						$cache->orders[ $order_id ] = $order;
+					}
 
 					if ( $order ) {
 						$order_loaded = true;
+						$loaded_order = $order;
 						$subtotal     = $order->get_prices_include_tax() ? self::get_tax_inclusive_subtotal( $order ) : $order->get_subtotal();
 					}
 					break;
@@ -668,20 +791,299 @@ class WC_Subscriptions_Coupon {
 			return false;
 		}
 
+		if ( 1 === $matched_orders ) {
+			if ( $cache && array_key_exists( $matched_order_id, $cache->order_subtotals ) ) {
+				return $cache->order_subtotals[ $matched_order_id ];
+			}
+
+			if ( self::is_order_pay_renewal_context( $loaded_order ) ) {
+				$subtotal = wc_prices_include_tax() ? self::get_tax_inclusive_subtotal( $loaded_order ) : $loaded_order->get_subtotal();
+			}
+
+			$current_subtotal = self::get_current_renewal_subtotal( $loaded_order );
+			if ( false !== $current_subtotal ) {
+				$subtotal = $current_subtotal;
+			}
+			if ( $cache ) {
+				$cache->order_subtotals[ $matched_order_id ] = $subtotal;
+			}
+		}
+
 		return $subtotal;
+	}
+
+	/**
+	 * Check whether an order and cart represent one ordinary payable renewal.
+	 *
+	 * This intentionally does not require complete current financial line data. An
+	 * unsafe current-line candidate must still fall back to the whole persisted order
+	 * in the same current price-entry basis as its restored amount.
+	 *
+	 * @param WC_Order $order Renewal order matched from the coupon session.
+	 * @return bool
+	 */
+	private static function is_order_pay_renewal_context( $order ) {
+		if ( ! WC()->cart instanceof WC_Cart || ! WC()->session || ! $order instanceof WC_Order ) {
+			return false;
+		}
+
+		if ( wcs_is_subscription( $order ) || ! $order->has_status( array( 'pending', 'failed' ) ) || ! wcs_order_contains_renewal( $order ) || wcs_order_contains_early_renewal( $order ) ) {
+			return false;
+		}
+
+		$renewal_order_ids = array();
+		$subscription_ids  = array();
+		foreach ( WC()->cart->get_cart() as $cart_item ) {
+			if ( ! is_array( $cart_item ) ) {
+				return false;
+			}
+
+			if ( isset( $cart_item['subscription_initial_payment'] )
+				|| isset( $cart_item['subscription_resubscribe'] )
+				|| isset( $cart_item['subscription_switch'] )
+			) {
+				return false;
+			}
+
+			if ( ! array_key_exists( 'subscription_renewal', $cart_item ) ) {
+				continue;
+			}
+
+			if ( ! is_array( $cart_item['subscription_renewal'] )
+				|| ! empty( $cart_item['subscription_renewal']['subscription_renewal_early'] )
+				|| ! isset( $cart_item['subscription_renewal']['subscription_id'] )
+				|| ! isset( $cart_item['subscription_renewal']['renewal_order_id'] )
+			) {
+				return false;
+			}
+
+			$subscription_id  = self::normalize_positive_integer_id( $cart_item['subscription_renewal']['subscription_id'] );
+			$renewal_order_id = self::normalize_positive_integer_id( $cart_item['subscription_renewal']['renewal_order_id'] );
+			if ( false === $subscription_id || false === $renewal_order_id || $renewal_order_id !== $order->get_id() ) {
+				return false;
+			}
+
+			$subscription_ids[ $subscription_id ]   = true;
+			$renewal_order_ids[ $renewal_order_id ] = true;
+		}
+
+		return 1 === count( $subscription_ids ) && 1 === count( $renewal_order_ids );
+	}
+
+	/**
+	 * Get the current calculated subtotal for an ordinary payable renewal.
+	 *
+	 * Any incomplete or ambiguous candidate falls back to the persisted order
+	 * subtotal. Every source renewal line must map uniquely to an eligible cart
+	 * line. After source synchronization, an unmarked order line can be excluded
+	 * only when it uniquely matches a current ordinary product and quantity.
+	 *
+	 * @param WC_Order $order The renewal order matched from the coupon session.
+	 * @return float|false Current subtotal, or false to use the persisted subtotal.
+	 */
+	private static function get_current_renewal_subtotal( $order ) {
+		if ( ! self::is_order_pay_renewal_context( $order ) ) {
+			return false;
+		}
+
+		$order_items = $order->get_items();
+		if ( empty( $order_items ) ) {
+			return false;
+		}
+
+		$subtotal             = 0.0;
+		$matched_item_ids     = array();
+		$renewal_order_ids    = array();
+		$subscription_ids     = array();
+		$renewal_products     = array();
+		$ordinary_products    = array();
+		$sources_synchronized = true;
+
+		foreach ( WC()->cart->get_cart() as $cart_item_key => $cart_item ) {
+			if ( ! is_array( $cart_item ) ) {
+				continue;
+			}
+
+			if ( isset( $cart_item['subscription_initial_payment'] )
+				|| isset( $cart_item['subscription_resubscribe'] )
+				|| isset( $cart_item['subscription_switch'] )
+			) {
+				return false;
+			}
+
+			if ( ! array_key_exists( 'subscription_renewal', $cart_item ) ) {
+				if ( isset( $cart_item['data'] ) && $cart_item['data'] instanceof WC_Product ) {
+					$product_id                         = wcs_get_canonical_product_id( $cart_item['data'] );
+					$ordinary_products[ $product_id ][] = $cart_item;
+				}
+				continue;
+			}
+
+			if ( ! is_array( $cart_item['subscription_renewal'] )
+				|| ! empty( $cart_item['subscription_renewal']['subscription_renewal_early'] )
+				|| ! isset( $cart_item['subscription_renewal']['subscription_id'] )
+				|| ! isset( $cart_item['subscription_renewal']['renewal_order_id'] )
+			) {
+				return false;
+			}
+
+			$subscription_id  = self::normalize_positive_integer_id( $cart_item['subscription_renewal']['subscription_id'] );
+			$renewal_order_id = self::normalize_positive_integer_id( $cart_item['subscription_renewal']['renewal_order_id'] );
+			if ( false === $subscription_id || false === $renewal_order_id ) {
+				return false;
+			}
+
+			$subscription_ids[ $subscription_id ]   = true;
+			$renewal_order_ids[ $renewal_order_id ] = true;
+			if ( 1 < count( $subscription_ids ) || 1 < count( $renewal_order_ids ) || $renewal_order_id !== $order->get_id() ) {
+				return false;
+			}
+
+			$order_item = self::get_renewal_order_item_for_cart_item( $cart_item, $cart_item_key, $order_items );
+			if ( ! $order_item instanceof WC_Order_Item_Product || isset( $matched_item_ids[ $order_item->get_id() ] ) ) {
+				return false;
+			}
+
+			if ( ! isset( $cart_item['data'] ) || ! $cart_item['data'] instanceof WC_Product ) {
+				return false;
+			}
+
+			$product_id = wcs_get_canonical_product_id( $cart_item['data'] );
+			if ( wcs_get_canonical_product_id( $order_item ) !== $product_id || ! self::is_subscription_renewal_line_item( $cart_item['data'], $cart_item ) ) {
+				return false;
+			}
+
+			if ( ! array_key_exists( 'line_subtotal', $cart_item )
+				|| ! is_numeric( $cart_item['line_subtotal'] )
+				|| ! is_finite( (float) $cart_item['line_subtotal'] )
+				|| (float) $cart_item['line_subtotal'] < 0
+				|| ! isset( $cart_item['line_tax_data'] )
+				|| ! is_array( $cart_item['line_tax_data'] )
+				|| ! isset( $cart_item['line_tax_data']['subtotal'] )
+				|| ! is_array( $cart_item['line_tax_data']['subtotal'] )
+			) {
+				return false;
+			}
+
+			$subtotal_tax = 0.0;
+			foreach ( $cart_item['line_tax_data']['subtotal'] as $tax ) {
+				if ( ! is_numeric( $tax ) || ! is_finite( (float) $tax ) || (float) $tax < 0 ) {
+					return false;
+				}
+				$subtotal_tax += (float) $tax;
+				if ( ! is_finite( $subtotal_tax ) ) {
+					return false;
+				}
+			}
+
+			$matched_item_ids[ $order_item->get_id() ] = true;
+			$renewal_products[ $product_id ]           = true;
+			if ( $order_item->get_meta( '_cart_item_key_subscription_renewal', true ) !== $cart_item_key ) {
+				$sources_synchronized = false;
+			}
+			$subtotal += (float) $cart_item['line_subtotal'];
+			if ( wc_prices_include_tax() ) {
+				$subtotal += $subtotal_tax;
+			}
+			if ( ! is_finite( $subtotal ) ) {
+				return false;
+			}
+		}
+
+		if ( 1 !== count( $renewal_order_ids ) || 1 !== count( $subscription_ids ) ) {
+			return false;
+		}
+
+		$matched_ordinary_products = array();
+		foreach ( $order_items as $order_item ) {
+			if ( isset( $matched_item_ids[ $order_item->get_id() ] ) ) {
+				continue;
+			}
+			if ( ! $sources_synchronized ) {
+				return false;
+			}
+
+			$product_id = wcs_get_canonical_product_id( $order_item );
+			if ( $order_item->get_meta( '_cart_item_key_subscription_renewal', true )
+				|| isset( $renewal_products[ $product_id ] )
+				|| ! isset( $ordinary_products[ $product_id ] )
+				|| 1 !== count( $ordinary_products[ $product_id ] )
+				|| isset( $matched_ordinary_products[ $product_id ] )
+				|| ! isset( $ordinary_products[ $product_id ][0]['quantity'] )
+				|| ! is_numeric( $ordinary_products[ $product_id ][0]['quantity'] )
+				|| ! is_finite( (float) $ordinary_products[ $product_id ][0]['quantity'] )
+				|| (float) $ordinary_products[ $product_id ][0]['quantity'] < 0
+				|| (float) $order_item->get_quantity() !== (float) $ordinary_products[ $product_id ][0]['quantity']
+			) {
+				return false;
+			}
+
+			$matched_ordinary_products[ $product_id ] = true;
+		}
+
+		return $subtotal;
+	}
+
+	/**
+	 * Resolve a valid source ID, falling back to its cart key when absent or stale.
+	 *
+	 * A supplied malformed ID fails closed instead of trying the cart-key fallback.
+	 *
+	 * @param array                   $cart_item     Renewal cart item data.
+	 * @param string                  $cart_item_key Cart item key.
+	 * @param WC_Order_Item_Product[] $order_items   Renewal order line items.
+	 * @return WC_Order_Item_Product|false The unique source line, or false.
+	 */
+	private static function get_renewal_order_item_for_cart_item( $cart_item, $cart_item_key, $order_items ) {
+		$line_item_id = 0;
+		if ( isset( $cart_item['subscription_renewal']['line_item_id'] ) ) {
+			$line_item_id = self::normalize_positive_integer_id( $cart_item['subscription_renewal']['line_item_id'] );
+			if ( false === $line_item_id ) {
+				return false;
+			}
+		}
+
+		if ( $line_item_id > 0 && isset( $order_items[ $line_item_id ] ) ) {
+			return $order_items[ $line_item_id ];
+		}
+
+		$matched_item = false;
+		foreach ( $order_items as $order_item ) {
+			if ( $order_item->get_meta( '_cart_item_key_subscription_renewal', true ) !== $cart_item_key ) {
+				continue;
+			}
+
+			if ( false !== $matched_item ) {
+				return false;
+			}
+			$matched_item = $order_item;
+		}
+
+		return $matched_item;
+	}
+
+	/**
+	 * Normalize a positive integer identity without truncating ambiguous values.
+	 *
+	 * @param mixed $value Candidate object identity.
+	 * @return int|false Normalized identity, or false when invalid.
+	 */
+	private static function normalize_positive_integer_id( $value ) {
+		if ( ! is_numeric( $value ) || ! is_finite( (float) $value ) || (float) $value <= 0 || floor( (float) $value ) !== (float) $value ) {
+			return false;
+		}
+
+		$value = (int) $value;
+		return $value > 0 ? $value : false;
 	}
 
 	/**
 	 * Get an order's subtotal with each taxable line item's subtotal tax included.
 	 *
-	 * Mirrors the price priming in WCS_Cart_Renewal::get_cart_item_from_session(), which builds
-	 * tax-inclusive renewal cart item prices from the same line items: tax is added only when the
-	 * item's product exists and is taxable, reading the same tax sources in the same order of
-	 * precedence, so the result equals the sum of the primed cart item prices.
-	 *
-	 * Unrepaired '_subtracted_base_location_tax' meta does not need repairing here: the price
-	 * priming has already run for these items during cart load, before coupon totals are
-	 * calculated, and repaired them. This method only reads.
+	 * This is the persisted-order fallback, not a projection using current checkout
+	 * tax rates. For products that still exist and are taxable, prefer stored
+	 * subtracted-base taxes to recorded subtotal taxes, matching the legacy basis.
+	 * This read-only helper does not repair historical metadata.
 	 *
 	 * @param WC_Order $order The renewal order.
 	 * @return float The order subtotal including each taxable item's subtotal tax.

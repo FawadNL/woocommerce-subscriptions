@@ -776,8 +776,13 @@ function wcs_can_items_be_removed( $subscription, $user_id = 0 ) {
 	/**
 	 * Filters whether line items can be removed from a subscription.
 	 *
+	 * Runs when the remove item control is rendered, and again when a removal request is processed on 'init', before
+	 * the main query is parsed. Callbacks must not depend on conditional tags such as is_account_page() or
+	 * is_wc_endpoint_url(), which return false at that point.
+	 *
 	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v2.0
 	 * @since 9.2.0 Added the $user_id parameter.
+	 * @since 9.3.0 Also applied when a removal request is processed.
 	 *
 	 * @param bool            $allow_remove Whether line items can be removed.
 	 * @param WC_Subscription $subscription The subscription the line items belong to.
@@ -796,6 +801,20 @@ function wcs_can_items_be_removed( $subscription, $user_id = 0 ) {
  * @since 1.0.0 - Migrated from WooCommerce Subscriptions v2.2.15
  */
 function wcs_can_item_be_removed( $item, $subscription ) {
+	/**
+	 * Filters whether a particular line item can be removed from a subscription.
+	 *
+	 * Runs when the remove item control is rendered, and again when a removal request is processed on 'init', before
+	 * the main query is parsed. Callbacks must not depend on conditional tags such as is_account_page() or
+	 * is_wc_endpoint_url(), which return false at that point.
+	 *
+	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v2.2.15
+	 * @since 9.3.0 Also applied when a removal request is processed.
+	 *
+	 * @param bool            $can_remove   Whether the line item can be removed.
+	 * @param WC_Order_Item   $item         The line item.
+	 * @param WC_Subscription $subscription The subscription the line item belongs to.
+	 */
 	return apply_filters( 'wcs_can_item_be_removed', true, $item, $subscription );
 }
 
