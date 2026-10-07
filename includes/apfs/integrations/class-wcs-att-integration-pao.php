@@ -225,12 +225,41 @@ class WCS_ATT_Integration_PAO {
 
 		if ( ! empty( $subscription_scheme ) && $subscription_scheme->has_price_filter() ) {
 
-			$price_offset_pct = array();
-			$price_offset     = 0.0;
+			$price_offset = 0.0;
+
+			/*
+			 * 'Override price' plans replace the product's price outright once 'WCS_ATT_Scheme::get_prices()'
+			 * runs, discarding a percentage-based add-on that Product Add-Ons already applied against the base
+			 * price via 'WC_Product::set_price()'. Resolve the plan price here so it can be re-applied below.
+			 * Discount plans ('inherit' / 'fixed_discount') don't need this: they scale the existing product
+			 * price instead of replacing it, so the percentage already scales through the discounted price.
+			 * The plan price is read from the scheme's own accessors rather than through 'get_prices()': that
+			 * method applies the public 'wcsatt_subscription_scheme_prices' filter after adding the offset, so a
+			 * callback that scales prices (currency conversion, for example) is applied once to plan price + offset
+			 * and the percentage still lands on the converted plan price. A callback that adds a fixed amount is not
+			 * reflected in the percentage; a single scalar offset cannot satisfy both, and the scaling case is the
+			 * one that must not be applied twice.
+			 */
+			$plan_price = null;
+
+			if ( WCS_ATT_Scheme::MODE_OVERRIDE === $subscription_scheme->get_pricing_mode() ) {
+
+				// Mirrors the sale/regular price selection in WCS_ATT_Scheme::get_prices() and must stay in sync with it.
+				$regular_price = $subscription_scheme->get_regular_price();
+				$sale_price    = $subscription_scheme->get_sale_price();
+
+				$plan_price = (float) ( '' !== $sale_price && $sale_price < $regular_price ? $sale_price : $regular_price );
+			}
 
 			foreach ( $cart_item['addons'] as $addon_key => $addon ) {
 
 				if ( 'percentage_based' === $addon['price_type'] ) {
+
+					if ( null !== $plan_price ) {
+						// Percentages are per unit; neither Product Add-Ons nor APFS round this value.
+						$price_offset += $plan_price * (float) $addon['price'] / 100;
+					}
+
 					continue;
 				}
 

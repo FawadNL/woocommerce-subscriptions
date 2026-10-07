@@ -89,8 +89,9 @@ class Abilities_Registrar {
 	 * (default false during rollout). Flip via `add_filter()` on a per-site
 	 * basis to enable; the default flips to true once the surface is stable.
 	 *
-	 * If the relevant Abilities API action has already fired we call the
-	 * registrar directly; otherwise we hook it for when the API boots.
+	 * Hooked onto `plugins_loaded` at priority 100 by WC_Subscriptions_Plugin::init()
+	 * so integrations can register their opt-in filter regardless of plugin
+	 * load order, including those that bootstrap on `plugins_loaded` themselves.
 	 *
 	 * Idempotent: only the first invocation that passes the feature gate
 	 * wires the hooks; subsequent calls short-circuit.

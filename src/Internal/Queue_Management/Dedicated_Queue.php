@@ -3,6 +3,7 @@
 namespace Automattic\WooCommerce_Subscriptions\Internal\Queue_Management;
 
 use ActionScheduler_Store;
+use Closure;
 
 /**
  * Represents a single dedicated queue scope for scheduled actions.
@@ -14,6 +15,17 @@ use ActionScheduler_Store;
  * One instance corresponds to one registered scope. The class is inert until {@see setup()} is called: the
  * constructor only captures dependencies and never adds hooks or otherwise reaches into WordPress / Action
  * Scheduler.
+ *
+ * The turn counter is the single input that decides whether a run is a focus turn, so it is read from and
+ * written to the options table directly rather than through the Options API. A persistent object cache that
+ * serves a stale value (or a stale `notoptions` entry) would otherwise freeze the counter below the rotation
+ * threshold, and with {@see Queue_Isolator} engaged that leaves subscription actions unclaimed on every run
+ * with no error anywhere. If the counter cannot be read or written at all, the scope stands down: it stops
+ * acting for the rest of the process, logs an error, and notifies its owner through the optional
+ * persistence-failure callback so the surrounding subsystem can switch itself off rather than starve
+ * subscription work. Standing down leaves the hooks registered on purpose: removing a callback from inside
+ * the hook it is running on makes WP_Hook skip the next priority bucket, which would drop third-party
+ * callbacks on that run.
  *
  * See `README.md` in this directory for the subsystem's motivation and the cooperation model with the other
  * Queue_Management classes.
@@ -71,14 +83,32 @@ class Dedicated_Queue {
 	private bool $filter_applied = false;
 
 	/**
-	 * @param string   $name     Identifier for this scope.
-	 * @param string[] $groups   Action Scheduler group(s) to scope rescoped runs to.
-	 * @param int      $rotation Rescope every Nth run. Defaults to 2.
+	 * Set once the turn counter could not be read or written. From then on the hook callbacks are inert for
+	 * the rest of the process; the owner decides whether the feature stays off across requests.
+	 *
+	 * @var bool
 	 */
-	public function __construct( string $name, array $groups, int $rotation = 2 ) {
-		$this->name     = $name;
-		$this->groups   = $groups;
-		$this->rotation = $rotation;
+	private bool $stood_down = false;
+
+	/**
+	 * Invoked once, after this scope has stood down, when the turn counter can no longer be read
+	 * from or written to the database. Lets the owner take the rest of the subsystem down with it.
+	 *
+	 * @var Closure|null
+	 */
+	private ?Closure $on_persistence_failure;
+
+	/**
+	 * @param string       $name                   Identifier for this scope.
+	 * @param string[]     $groups                 Action Scheduler group(s) to scope rescoped runs to.
+	 * @param int          $rotation               Rescope every Nth run. Defaults to 2.
+	 * @param Closure|null $on_persistence_failure Called when the turn counter cannot be persisted. Optional.
+	 */
+	public function __construct( string $name, array $groups, int $rotation = 2, ?Closure $on_persistence_failure = null ) {
+		$this->name                   = $name;
+		$this->groups                 = $groups;
+		$this->rotation               = $rotation;
+		$this->on_persistence_failure = $on_persistence_failure;
 	}
 
 	/**
@@ -112,13 +142,17 @@ class Dedicated_Queue {
 	 * foreign claim filter do not consume a turn. Each invocation that gets past the enable check emits
 	 * exactly one debug log entry capturing the outcome.
 	 *
+	 * The counter is persisted before the scope is applied. A focus turn that could not be recorded would
+	 * repeat on every subsequent run, so a failed read or write instead makes the scope stand down (see
+	 * {@see stand_down()}) without touching the claim filter.
+	 *
 	 * Isolating subscription work from non-rescoped runs (by asserting an `exclude-groups` filter) is the
 	 * job of {@see Queue_Isolator}, not this class. This class only ever sets the `group` filter.
 	 *
 	 * @return void
 	 */
 	public function maybe_apply_scope(): void {
-		if ( ! $this->is_enabled() ) {
+		if ( $this->stood_down || ! $this->is_enabled() ) {
 			return;
 		}
 
@@ -143,18 +177,30 @@ class Dedicated_Queue {
 		}
 
 		$existing_filter = $this->find_existing_claim_filter( $store );
-		$cycle           = $this->read_counter() + 1;
-		$applied         = false;
+		$counter         = $this->read_counter();
+
+		if ( null === $counter ) {
+			$this->stand_down( 'read' );
+			return;
+		}
+
+		$cycle   = $counter + 1;
+		$applied = false;
 
 		if ( null === $existing_filter ) {
-			if ( $cycle >= $this->rotation ) {
+			$is_focus_turn = $cycle >= $this->rotation;
+			$written       = $this->write_counter( $is_focus_turn ? 0 : $cycle );
+
+			if ( ! $written ) {
+				$this->stand_down( 'written' );
+				return;
+			}
+
+			if ( $is_focus_turn ) {
 				// @phpstan-ignore method.notFound (see earlier safety check using $this->get_capable_store())
 				$store->set_claim_filter( 'group', $this->groups );
 				$this->filter_applied = true;
 				$applied              = true;
-				$this->write_counter( 0 );
-			} else {
-				$this->write_counter( $cycle );
 			}
 		}
 
@@ -310,34 +356,143 @@ class Dedicated_Queue {
 	 * apart in the log.
 	 *
 	 * @param string $message Pre-formatted message body.
+	 * @param string $level   WC logger level. Defaults to 'debug'; stand-down entries use 'error'.
 	 *
 	 * @return void
 	 */
-	private function log( string $message ): void {
-		wc_get_logger()->debug(
+	private function log( string $message, string $level = 'debug' ): void {
+		wc_get_logger()->{$level}(
 			sprintf( '[scope=%s] %s', implode( ':', $this->groups ), $message ),
 			array( 'source' => self::LOG_SOURCE )
 		);
 	}
 
 	/**
-	 * Read the persisted turn counter for this scope.
+	 * Read the persisted turn counter for this scope straight from the options table.
 	 *
-	 * @return int
+	 * Deliberately bypasses `get_option()`: the counter is the only input to the focus-turn decision, and a
+	 * persistent object cache that serves a stale value (or a stale `notoptions` entry) would freeze it. The
+	 * cost is one indexed query per queue run.
+	 *
+	 * @return int|null The counter (0 when no row exists yet), or null if the query failed.
 	 */
-	private function read_counter(): int {
-		return (int) get_option( self::COUNTER_OPTION_PREFIX . $this->name, 0 );
+	private function read_counter(): ?int {
+		global $wpdb;
+
+		$table = $wpdb->options;
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$value = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT option_value FROM {$table} WHERE option_name = %s",
+				$this->counter_option_name()
+			)
+		);
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		if ( '' !== $wpdb->last_error ) {
+			return null;
+		}
+
+		return (int) $value;
 	}
 
 	/**
-	 * Persist the turn counter for this scope. Stored as a non-autoloaded option to keep the autoload payload
-	 * lean — the value is only consulted on queue-runner invocations.
+	 * Persist the turn counter for this scope straight to the options table, inserting the row on first use.
+	 * Stored as a non-autoloaded option to keep the autoload payload lean.
+	 *
+	 * Deliberately bypasses `update_option()`, whose own cached pre-read short-circuits the write whenever the
+	 * cache already holds the value being written. The object cache is not updated: nothing reads this option
+	 * through the Options API.
+	 *
+	 * A failed write is retried once before it counts as a failure. Two queue runners can overlap (see
+	 * {@see Concurrent_Batches_Booster}) and race this upsert on the same row; a deadlock or lock wait
+	 * timeout between them is transient, and one retry keeps it from switching the feature off.
 	 *
 	 * @param int $counter The new counter value.
 	 *
+	 * @return bool Whether the write succeeded. A write that changes nothing (another runner persisted the same
+	 *              value first) still counts as a success; only a query error is a failure.
+	 */
+	private function write_counter( int $counter ): bool {
+		global $wpdb;
+
+		if ( $this->upsert_counter( $counter ) ) {
+			return true;
+		}
+
+		$this->log( sprintf( 'Turn counter write failed and will be retried once. Database error: %s', $wpdb->last_error ) );
+
+		return $this->upsert_counter( $counter );
+	}
+
+	/**
+	 * Single attempt at the counter upsert.
+	 *
+	 * @param int $counter The new counter value.
+	 *
+	 * @return bool False only when the query errored.
+	 */
+	private function upsert_counter( int $counter ): bool {
+		global $wpdb;
+
+		$table = $wpdb->options;
+		$value = (string) $counter;
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$result = $wpdb->query(
+			$wpdb->prepare(
+				"INSERT INTO {$table} ( option_name, option_value, autoload ) VALUES ( %s, %s, 'off' ) ON DUPLICATE KEY UPDATE option_value = %s",
+				$this->counter_option_name(),
+				$value,
+				$value
+			)
+		);
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		return false !== $result;
+	}
+
+	/**
+	 * Option key under which this scope's turn counter is stored.
+	 *
+	 * @return string
+	 */
+	private function counter_option_name(): string {
+		return self::COUNTER_OPTION_PREFIX . $this->name;
+	}
+
+	/**
+	 * Take this scope out of service after the turn counter could not be read or written.
+	 *
+	 * Marks the scope as stood down (so the claim filter is never set on the strength of a counter we cannot
+	 * trust), records an error-level entry with the database error, and then hands control to the owner's
+	 * persistence-failure callback, if one was supplied. The hooks stay registered: see the class docblock.
+	 *
+	 * @param string $failed_operation Past-tense verb for the log line: 'read' or 'written'.
+	 *
 	 * @return void
 	 */
-	private function write_counter( int $counter ): void {
-		update_option( self::COUNTER_OPTION_PREFIX . $this->name, $counter, false );
+	private function stand_down( string $failed_operation ): void {
+		global $wpdb;
+
+		// Captured first: anything below (including the logger's own bootstrap) may run a query and reset it.
+		$database_error = '' !== $wpdb->last_error ? $wpdb->last_error : 'none reported';
+
+		$this->stood_down = true;
+
+		$this->log(
+			sprintf(
+				'Dedicated queue runner "%1$s" stood down: its turn counter could not be %2$s. Database error: %3$s',
+				$this->name,
+				$failed_operation,
+				$database_error
+			),
+			'error'
+		);
+
+		if ( null !== $this->on_persistence_failure ) {
+			( $this->on_persistence_failure )();
+		}
 	}
 }

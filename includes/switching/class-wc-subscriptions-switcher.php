@@ -1,5 +1,6 @@
 <?php
 
+use Automattic\WooCommerce\StoreApi\Exceptions\RouteException;
 use Automattic\WooCommerce_Subscriptions\Internal\Admin\Settings\Classic_Renderer;
 use Automattic\WooCommerce_Subscriptions\Internal\Admin\Settings\Settings_Layout;
 use Automattic\WooCommerce_Subscriptions\Internal\Products\Plan_Utils;
@@ -80,6 +81,9 @@ class WC_Subscriptions_Switcher {
 
 		// Store API passes the live order object rather than an ID and posted data.
 		add_action( 'woocommerce_store_api_checkout_update_order_meta', array( __CLASS__, 'add_store_api_order_meta' ), 10, 1 );
+
+		// Refuse a switch that is no longer allowed before the order is created, on classic and Store API checkout.
+		add_action( 'woocommerce_check_cart_items', array( __CLASS__, 'check_switch_cart_items' ) );
 
 		// Don't allow switching to the same product
 		add_filter( 'woocommerce_add_to_cart_validation', array( __CLASS__, 'validate_switch_request' ), 10, 4 );
@@ -238,6 +242,8 @@ class WC_Subscriptions_Switcher {
 
 			foreach ( $switch_items as $cart_item_key => $switch_item ) {
 
+				// Same eligibility checks as self::is_switch_cart_item_allowed(), except that here a subscription which
+				// cannot be loaded makes the item invalid, because this handler can remove it from the cart.
 				$subscription  = wcs_get_subscription( $switch_item['subscription_id'] );
 				$is_valid_item = is_object( $subscription );
 
@@ -1383,6 +1389,107 @@ class WC_Subscriptions_Switcher {
 	}
 
 	/**
+	 * Refuses checkout while the cart holds a switch the current customer is no longer allowed to make.
+	 *
+	 * Eligibility - the subscription's status, whether switching is enabled, whether its payment gateway
+	 * supports the amount and date changes a switch makes, and whether the product is a switchable type -
+	 * is checked when the switch link is offered, when the item is added to the cart, and on every classic
+	 * cart or checkout page load by @see self::subscription_switch_handler(). Store API checkout completes
+	 * over the REST API, where 'template_redirect' never fires and so that last check never runs.
+	 *
+	 * 'woocommerce_check_cart_items' fires before the order is created on both checkout surfaces: an error
+	 * notice stops classic checkout, and Store API checkout returns it as a 409 error.
+	 *
+	 * @since 9.3.0
+	 */
+	public static function check_switch_cart_items() {
+		if ( ! isset( WC()->cart ) ) {
+			return;
+		}
+
+		foreach ( WC()->cart->cart_contents as $cart_item ) {
+			if ( ! self::is_switch_cart_item_allowed( $cart_item ) ) {
+				wc_add_notice( self::get_invalid_switch_checkout_message(), 'error' );
+				return;
+			}
+		}
+	}
+
+	/**
+	 * Confirms every switch in the cart is still one the current customer is allowed to make.
+	 *
+	 * The last guard before a switch is applied. @see self::check_switch_cart_items() normally refuses the
+	 * checkout before the order exists; this covers a switch that becomes ineligible after that check ran.
+	 *
+	 * @since 9.3.0
+	 *
+	 * @throws Exception If any switch in the cart can no longer be made by the current customer. A RouteException
+	 *                   when WooCommerce provides one, so Store API checkout reports a 409 rather than a 500.
+	 */
+	private static function validate_switches_at_checkout() {
+		if ( empty( WC()->cart->recurring_carts ) || ! is_array( WC()->cart->recurring_carts ) ) {
+			return;
+		}
+
+		foreach ( WC()->cart->recurring_carts as $recurring_cart ) {
+			// process_checkout() applies switches from these same recurring carts, so every switch it applies
+			// is checked here first, however the items are grouped (@see self::get_recurring_cart_key()).
+			foreach ( $recurring_cart->get_cart() as $cart_item ) {
+				if ( self::is_switch_cart_item_allowed( $cart_item ) ) {
+					continue;
+				}
+
+				$message = self::get_invalid_switch_checkout_message();
+
+				if ( class_exists( RouteException::class ) ) {
+					throw new RouteException( 'woocommerce_subscriptions_invalid_switch', $message, 409 ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- The checkout escapes this message where it displays it.
+				}
+
+				throw new Exception( $message ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- The checkout escapes this message where it displays it.
+			}
+		}
+	}
+
+	/**
+	 * Checks whether a cart item is not a switch, or is a switch the current customer may still make.
+	 *
+	 * @param array $cart_item Cart item.
+	 * @return bool False only for a switch the current customer may no longer make.
+	 */
+	private static function is_switch_cart_item_allowed( $cart_item ) {
+		if ( ! isset( $cart_item['subscription_switch']['subscription_id'] ) ) {
+			return true;
+		}
+
+		$subscription = wcs_get_subscription( $cart_item['subscription_switch']['subscription_id'] );
+
+		// process_checkout() does not apply a switch to a subscription which cannot be loaded. The item falls
+		// through to WC_Subscriptions_Checkout::process_checkout(), which creates a new subscription from it.
+		// self::subscription_switch_handler() makes the same checks but removes such an item from the cart instead.
+		if ( ! $subscription ) {
+			return true;
+		}
+
+		// No item ID means this item is being added to the subscription rather than switched.
+		if ( empty( $cart_item['subscription_switch']['item_id'] ) ) {
+			return self::can_item_be_added_by_user( $cart_item, $subscription );
+		}
+
+		$item = wcs_get_order_item( $cart_item['subscription_switch']['item_id'], $subscription );
+
+		return ! empty( $item ) && self::can_item_be_switched_by_user( $item, $subscription );
+	}
+
+	/**
+	 * Gets the message shown when checkout is refused because of a switch that is no longer allowed.
+	 *
+	 * @return string
+	 */
+	private static function get_invalid_switch_checkout_message() {
+		return __( 'Your cart contained an invalid subscription switch request. Please return to your cart and try again.', 'woocommerce-subscriptions' );
+	}
+
+	/**
 	 * Handle any subscription switch items on checkout (and before WC_Subscriptions_Checkout::process_checkout())
 	 *
 	 * If the item is on the same billing schedule as the old subscription (and the next payment date is the same) or the
@@ -1399,6 +1506,12 @@ class WC_Subscriptions_Switcher {
 		if ( ! WC_Subscriptions_Cart::cart_contains_subscription() ) {
 			return;
 		}
+
+		// Refuse the whole checkout before anything is written to a subscription. Failing part way through would
+		// leave switch items on one subscription and none on the next. This runs outside the try block below so the
+		// refusal cannot delete the order: the Store API order-pay route fires this hook for an existing order,
+		// such as a failed renewal, which has nothing to do with the switch left in the session cart.
+		self::validate_switches_at_checkout();
 
 		$order             = wc_get_order( $order_id );
 		$switch_order_data = array();
@@ -2119,6 +2232,15 @@ class WC_Subscriptions_Switcher {
 
 			} else {
 
+				// Whether this item may be switched can change after the switch link was issued: switching may
+				// have been turned off, the subscription may no longer be active, or its payment gateway may no
+				// longer support the amount and date changes a switch makes. Refuse the switch when it is added to
+				// the cart, so the customer is told now rather than when the order is placed
+				// (@see self::validate_switches_at_checkout()).
+				if ( ! self::can_item_be_switched_by_user( $item, $subscription ) ) {
+					throw new Exception( __( 'This subscription can no longer be switched.', 'woocommerce-subscriptions' ) );
+				}
+
 				$identical_attributes = true;
 
 				foreach ( $_POST as $key => $value ) {
@@ -2752,8 +2874,20 @@ class WC_Subscriptions_Switcher {
 			$subscription = wcs_get_subscription( $subscription );
 		}
 
-		$product_id = wcs_get_canonical_product_id( $old_item );
-		WCS_Download_Handler::revoke_downloadable_file_permission( $product_id, $subscription->get_id(), $subscription->get_user_id() );
+		if ( ! $subscription ) {
+			return;
+		}
+
+		$product_id = absint( wcs_get_canonical_product_id( $old_item ) );
+
+		// A switch that keeps the product, such as a quantity change, is not granted new permissions to replace these.
+		foreach ( $subscription->get_items() as $item ) {
+			if ( absint( wcs_get_canonical_product_id( $item ) ) === $product_id ) {
+				return;
+			}
+		}
+
+		WCS_Download_Handler::revoke_subscription_download_permissions( $product_id, $subscription );
 
 	}
 

@@ -644,6 +644,13 @@ function wcs_update_order_item_type( $item_id, $new_type, $order_or_subscription
 	// When possible, also clear the order items' cache for the object to which this item relates (double cache :sob:)
 	if ( ! empty( $order_or_subscription_id ) ) {
 		wp_cache_delete( 'order-items-' . $order_or_subscription_id, 'orders' );
+
+		// Evict the order object as well, as WC_Abstract_Order::save_items() does after changing items, so the next
+		// wcs_get_subscription() builds a fresh object. An object cache that returns the cached instance rather than a
+		// copy would otherwise hand back an object whose loaded items predate this change.
+		if ( \Automattic\WooCommerce\Utilities\OrderUtil::orders_cache_usage_is_enabled() ) {
+			wc_get_container()->get( \Automattic\WooCommerce\Caches\OrderCache::class )->remove( absint( $order_or_subscription_id ) );
+		}
 	}
 }
 

@@ -1,5 +1,45 @@
 *** WooCommerce Subscriptions Changelog ***
 
+2026-10-06 - version 9.3.0
+* Fix: Gifting security improvements:
+    * A recipient paying a renewal or renewing early through the checkout no longer replaces the purchaser's billing name, email and address on the subscription. The shipping address still updates to what the recipient enters.
+    * On the classic checkout, a recipient now sees their own billing details instead of the purchaser's. Previously, submitting the form unchanged saved the purchaser's contact onto the recipient's own account.
+    * Saving My Account > Account details with the renewals billing contact box ticked no longer writes the recipient's name and email onto subscriptions gifted to them, which sent the purchaser's renewal invoices to the recipient.
+    * A recipient can no longer open or submit the billing address form for a gifted subscription. They can still change its shipping address.
+    * When a downloadable product is removed from a gifted subscription, or the subscription is switched away from it, the recipient's download links now stop working. Previously they kept working.
+* Fix: Early renewal security and double-charge protections:
+    * Two early renewal requests arriving together for the same subscription, such as a double-click on Pay now or a browser prefetching the link, no longer charge the payment method on file twice for one billing period.
+    * A Pay now link stops working once its renewal order has been paid or is awaiting payment confirmation, so following it again does not charge again. Links issued before this release also stop working. Opening the subscription from My Account > Subscriptions issues a fresh one.
+    * An early renewal link that was not issued in the customer's own logged-in session, including the one in a renewal reminder email, now takes them to their subscription to choose whether to renew, instead of emptying their cart and sending them straight to checkout.
+* Fix: Paying pending or failed renewal orders through checkout now preserves product subtotals before tax and keeps the order's coupon discounts in sync with checkout.
+* Fix: Category-restricted coupons no longer discount products outside their selected categories when customers pay a pending subscription order.
+* Fix: Customers who log in at checkout while paying a renewal are no longer charged twice for the product when their cart also held the same subscription product added separately.
+* Fix: The 'woocommerce_subscriptions_disable_manual_renewal_stock_validation' filter once again lets customers pay a manual renewal for an out of stock product.
+* Fix: A subscription switch the store no longer allows is now refused when the order is placed, on the block checkout as well as the classic one.
+* Fix: Adding a cart to an existing subscription no longer fails with "Your cart cannot be added to subscription" when the cart item is on a plan created in the Subscriptions plans screens since 9.0.0.
+* Fix: Percentage-based add-ons are now charged on top of subscription plans that set their own price, instead of being dropped from the cart total.
+* Fix: Subscription plan prices on Product Bundles and Composite Products no longer show placeholder values on stores where the bundle or composite script loads before ours.
+* Fix: Removing a line item by link now follows the same rules as the remove control in My Account > Subscriptions. The last remaining item, items on a subscription that is not active, on hold or pending, and items an extension marks as unremovable, such as a bundle's child items, can no longer be removed this way.
+* Fix: Undoing an item removal from My Account no longer fails with a critical error on some stores with a persistent object cache, which left the subscription total and later renewals at the reduced amount.
+* Fix: Stale download permissions for removed subscription products are now cleared when permissions are regenerated.
+* Fix: A subscription switch that keeps the same product, such as a quantity change, no longer removes the customer's access to its downloadable files.
+* Fix: Saving a product's Subscription Downloads links now only changes links to products you have permission to edit. Changes to any other product are refused and its existing links are kept.
+* Fix: Saving a subscription product whose linked downloadable product has since been deleted no longer fails with a fatal error, and clears the stale link.
+* Fix: Subscription status notes created by the Cancel bulk action now identify the administrator who performed it instead of appearing as system notes.
+* Fix: Sorting the Subscriptions list by Last Order Date no longer takes tens of seconds on stores with thousands of subscriptions.
+* Fix: Setting a subscription or renewal order line item's quantity to zero in the admin no longer fails with a fatal error on stores that enter prices inclusive of tax.
+* Fix: Saving an order or subscription in the admin can no longer change the recorded base location tax on another order's line items.
+* Fix: Linking a subscription to a parent order that does not exist, or that you cannot edit, now shows an error instead of a fatal error or a silent link.
+* Fix: The PayPal out-of-date subscription ID notice and IPN failure notice can now only be dismissed by an administrator from the notice itself. Previously any logged-in user could hide either one with a crafted link.
+* Fix: A subscription's next payment date is no longer pushed forward by an extra billing period when it is recalculated before any order is dated on or after the subscription's start date.
+* Fix: Dedicated processing now tracks its turn counter in the database only, so a stale object cache can no longer stop scheduled actions from running. If the counter cannot be saved, dedicated processing turns itself off instead of stalling.
+* Fix: Payment retry lookups, Subscriptions health check runs, and WooCommerce Tracker telemetry now work on hosts whose database layer does not support the '%i' identifier placeholder in prepared queries, such as on WordPress.com.
+* Dev: When wcs_get_early_renewal_url() is called in the logged-in request of the subscriber or the gift recipient, the URL now carries a nonce in the 'woocommerce_subscriptions_early_renewal_nonce' query arg, and WCS_Cart_Early_Renewal::maybe_setup_cart() requires it before it sets up the cart. Build a URL of your own with WCS_Cart_Early_Renewal::NONCE_QUERY_ARG and WCS_Cart_Early_Renewal::get_nonce_action( $subscription_id ).
+* Dev: Percentage-based Product Add-Ons on 'Override price' plans are worked out from the plan's own price before the `wcsatt_subscription_scheme_prices` filter runs, so a callback that scales prices is applied once to plan price plus add-on. A callback that adds a fixed amount is not reflected in the add-on percentage.
+* Dev: Added WC_Subscription::maybe_cancel() with manual note attribution and deprecated WC_Subscription::cancel_order(), which now emits a deprecation notice before forwarding to it. Subscriptions' own cancellation paths now call maybe_cancel(), so an override of cancel_order() in a subclass no longer runs for them.
+* Dev: Added WCS_Download_Handler::revoke_subscription_download_permissions( $product_id, $subscription ), which revokes a product's download permissions on a subscription for every user who holds them. Subscriptions' own revocation paths now use it; revoke_downloadable_file_permission() is unchanged.
+* Dev: Deprecated WC_Subscription_Downloads_Products::save_simple_product_data(), which was unhooked in 8.3.0 alongside its two siblings. Use WC_Subscription_Downloads_Products::handle_product_save().
+
 2026-09-08 - version 9.2.0
 * Update: We've redesigned the WooCommerce Subscriptions settings page — a single-column layout with clearer labels and inline help:
     * Early renewal payments are now on by default on stores that never saved the "Allow early renewal payments" setting. Turn it off under WooCommerce > Settings > Subscriptions.

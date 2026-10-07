@@ -31,6 +31,9 @@ class WCS_PayPal_Admin {
 		// Handle requests to check whether a PayPal account has Reference Transactions enabled
 		add_action( 'admin_init', __CLASS__ . '::maybe_check_account' );
 
+		// Handle requests to dismiss one of the PayPal admin notices
+		add_action( 'admin_init', __CLASS__ . '::maybe_dismiss_admin_notices' );
+
 		// Maybe show notice to enter PayPal API credentials
 		add_action( 'admin_notices', __CLASS__ . '::maybe_show_admin_notices' );
 
@@ -91,8 +94,6 @@ class WCS_PayPal_Admin {
 	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v2.0
 	 */
 	public static function maybe_show_admin_notices() {
-		self::maybe_disable_invalid_profile_notice();
-
 		$valid_paypal_currency = in_array( get_woocommerce_currency(), apply_filters( 'woocommerce_paypal_supported_currencies', array( 'AUD', 'BRL', 'CAD', 'MXN', 'NZD', 'HKD', 'SGD', 'USD', 'EUR', 'JPY', 'TRY', 'NOK', 'CZK', 'DKK', 'HUF', 'ILS', 'MYR', 'PHP', 'PLN', 'SEK', 'CHF', 'TWD', 'THB', 'GBP', 'RMB' ) ) );
 		$is_paypal_enabled = 'yes' === WCS_PayPal::get_option( 'enabled' );
 
@@ -176,7 +177,7 @@ class WCS_PayPal_Admin {
 				'text' => sprintf( esc_html__( 'There is a problem with PayPal. Your PayPal account is issuing out-of-date subscription IDs. %1$sLearn more%2$s. %3$sDismiss%4$s.', 'woocommerce-subscriptions' ),
 					'<a href="https://woocommerce.com/document/subscriptions-canceled-suspended-paypal/#old-paypal-accounts" target="_blank">',
 					'</a>',
-					'<a href="' . esc_url( add_query_arg( 'wcs_disable_paypal_invalid_profile_id_notice', 'true' ) ) . '">',
+					'<a href="' . esc_url( wp_nonce_url( add_query_arg( 'wcs_disable_paypal_invalid_profile_id_notice', 'true' ), 'wcs_disable_paypal_invalid_profile_id_notice', '_wcsnonce' ) ) . '">',
 					'</a>'
 				),
 			);
@@ -210,23 +211,62 @@ class WCS_PayPal_Admin {
 		}
 
 		if ( ! empty( $notices ) ) {
-			include_once( dirname( __FILE__ ) . '/../templates/admin-notices.php' );
+			include __DIR__ . '/../templates/admin-notices.php';
 		}
 	}
 
 	/**
-	 * Disable the invalid profile notice when requested.
+	 * Handle requests to dismiss one of the PayPal admin notices.
 	 *
-	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v2.0
+	 * Hooked to 'admin_init' rather than 'admin_notices' so the dismissal is handled as a request, before any
+	 * output, and can send the merchant back to the screen they were on with the dismissal arguments stripped.
+	 *
+	 * @since 9.3.0
 	 */
-	protected static function maybe_disable_invalid_profile_notice() {
-		if ( isset( $_GET['wcs_disable_paypal_invalid_profile_id_notice'] ) ) {
-			update_option( 'wcs_paypal_invalid_profile_id', 'disabled' );
+	public static function maybe_dismiss_admin_notices() {
+		if ( ! isset( $_GET['wcs_disable_paypal_invalid_profile_id_notice'] ) && ! isset( $_GET['wcs_ipn_error_notice'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
 		}
 
-		if ( isset( $_GET['wcs_ipn_error_notice'] ) ) {
-			update_option( 'wcs_fatal_error_handling_ipn_ignored', true );
+		$dismissed = self::maybe_disable_invalid_profile_notice();
+
+		// Nonces expire while a notice stays on screen, so say why a dismissal failed rather than silently ignoring the click.
+		if ( ! $dismissed ) {
+			wp_nonce_ays( '' );
 		}
+
+		wp_safe_redirect( remove_query_arg( array( 'wcs_disable_paypal_invalid_profile_id_notice', 'wcs_ipn_error_notice', '_wcsnonce' ) ) );
+		exit;
+	}
+
+	/**
+	 * Dismiss the invalid profile ID notice or the IPN failure notice when requested.
+	 *
+	 * Dismissing a notice takes the capability the notices are shown to, and the nonce issued for that notice.
+	 *
+	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v2.0
+	 *
+	 * @return bool Whether a notice was dismissed.
+	 */
+	protected static function maybe_disable_invalid_profile_notice() {
+		if ( ! isset( $_GET['_wcsnonce'] ) || ! current_user_can( 'manage_options' ) ) {
+			return false;
+		}
+
+		$nonce     = wc_clean( wp_unslash( $_GET['_wcsnonce'] ) );
+		$dismissed = false;
+
+		if ( isset( $_GET['wcs_disable_paypal_invalid_profile_id_notice'] ) && false !== wp_verify_nonce( $nonce, 'wcs_disable_paypal_invalid_profile_id_notice' ) ) {
+			update_option( 'wcs_paypal_invalid_profile_id', 'disabled' );
+			$dismissed = true;
+		}
+
+		if ( isset( $_GET['wcs_ipn_error_notice'] ) && false !== wp_verify_nonce( $nonce, 'wcs_ipn_error_notice' ) ) {
+			update_option( 'wcs_fatal_error_handling_ipn_ignored', true );
+			$dismissed = true;
+		}
+
+		return $dismissed;
 	}
 
 	/**

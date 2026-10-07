@@ -117,17 +117,11 @@ class WCS_Admin_Post_Types {
 			return $pieces;
 		}
 
-		// Let's check whether we even have the privileges to do the things we want to do
-		if ( $this->is_db_user_privileged() ) {
-			$pieces = self::posts_clauses_high_performance( $pieces );
-		} else {
-			$pieces = self::posts_clauses_low_performance( $pieces );
-		}
+		$pieces = self::posts_clauses_last_order_date_join( $pieces );
 
 		// Normalise to a safe ASC/DESC literal before it reaches the ORDER BY clause below.
 		$order = self::normalize_order_direction( $query->query['order'] ?? '' );
 
-		// fields and order are identical in both cases
 		$pieces['fields'] .= ', COALESCE(lp.last_payment, o.post_date_gmt, 0) as lp';
 		$pieces['orderby'] = "CAST(lp AS DATETIME) {$order}";
 
@@ -161,62 +155,27 @@ class WCS_Admin_Post_Types {
 	}
 
 	/**
-	 * Modifies the query for a slightly faster, yet still pretty slow query in case the user does not have
-	 * the necessary privileges to run
+	 * Joins each subscription to the creation date of its most recent renewal order, and to its parent order,
+	 * so the list table can be sorted by last order date.
 	 *
-	 * @param $pieces
-	 *
-	 * @return mixed
+	 * @param array $pieces Associative array of the clauses for the query.
+	 * @return array $pieces Updated associative array of clauses for the query.
 	 */
-	private function posts_clauses_low_performance( $pieces ) {
+	private function posts_clauses_last_order_date_join( $pieces ) {
 		global $wpdb;
 
+		// The subscription ID is cast to an integer so the derived table gets an index on it. Joining the BIGINT post
+		// ID against the raw LONGTEXT meta value cannot use an index and forces the derived table to be scanned once
+		// per subscription, which makes this sort take tens of seconds on stores with thousands of subscriptions.
 		$pieces['join'] .= "LEFT JOIN
 				(SELECT
 					MAX( p.post_date_gmt ) as last_payment,
-					pm.meta_value
+					CAST( pm.meta_value AS UNSIGNED ) as subscription_id
 				FROM {$wpdb->postmeta} pm
 				LEFT JOIN {$wpdb->posts} p ON p.ID = pm.post_id
 				WHERE pm.meta_key = '_subscription_renewal'
-				GROUP BY pm.meta_value) lp
-			ON {$wpdb->posts}.ID = lp.meta_value
-			LEFT JOIN {$wpdb->posts} o on {$wpdb->posts}.post_parent = o.ID";
-
-		return $pieces;
-	}
-
-	/**
-	 * Modifies the query in such a way that makes use of the CREATE TEMPORARY TABLE, DROP and INDEX
-	 * MySQL privileges.
-	 *
-	 * @param array $pieces
-	 *
-	 * @return array $pieces
-	 */
-	private function posts_clauses_high_performance( $pieces ) {
-		global $wpdb;
-
-		// in case multiple users sort at the same time
-		$session = wp_get_session_token();
-
-		$table_name = substr( "{$wpdb->prefix}tmp_{$session}_lastpayment", 0, 64 );
-
-		// Let's create a temporary table, drop the previous one, because otherwise this query is hella slow
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS {$table_name}" );
-
-		$wpdb->query(
-			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			"CREATE TEMPORARY TABLE {$table_name} (id INT PRIMARY KEY, last_payment DATETIME) AS
-			 SELECT pm.meta_value as id, MAX( p.post_date_gmt ) as last_payment FROM {$wpdb->postmeta} pm
-			 LEFT JOIN {$wpdb->posts} p ON p.ID = pm.post_id
-			 WHERE pm.meta_key = '_subscription_renewal'
-			 GROUP BY pm.meta_value"
-		);
-		// Magic ends here
-
-		$pieces['join'] .= "LEFT JOIN {$table_name} lp
-			ON {$wpdb->posts}.ID = lp.id
+				GROUP BY CAST( pm.meta_value AS UNSIGNED )) lp
+			ON {$wpdb->posts}.ID = lp.subscription_id
 			LEFT JOIN {$wpdb->posts} o on {$wpdb->posts}.post_parent = o.ID";
 
 		return $pieces;
@@ -1550,7 +1509,7 @@ class WCS_Admin_Post_Types {
 				}
 
 				if ( 'cancelled' === $new_status ) {
-					$subscription->cancel_order( $note );
+					$subscription->maybe_cancel( $note, true );
 				} else {
 					$subscription->update_status( $new_status, $note, true );
 				}
@@ -1888,12 +1847,7 @@ class WCS_Admin_Post_Types {
 			return $pieces;
 		}
 
-		// Let's check whether we even have the privileges to do the things we want to do
-		if ( $this->is_db_user_privileged() ) {
-			$pieces = self::orders_table_clauses_high_performance( $pieces );
-		} else {
-			$pieces = self::orders_table_clauses_low_performance( $pieces );
-		}
+		$pieces = self::orders_table_clauses_last_order_date_join( $pieces );
 
 		// Normalise to a safe ASC/DESC literal before it reaches the ORDER BY clause below.
 		$query_order = self::normalize_order_direction( $args['order'] ?? '' );
@@ -1924,68 +1878,29 @@ class WCS_Admin_Post_Types {
 	}
 
 	/**
-	 * Adds order table query clauses to sort the subscriptions list table by last payment date.
-	 *
-	 * This function provides a lower performance method using a subquery to sort by last payment date.
-	 * It is a HPOS version of @see self::posts_clauses_low_performance().
+	 * Joins each subscription to the creation date of its most recent renewal order, and to its parent order,
+	 * so the list table can be sorted by last order date. HPOS version of @see self::posts_clauses_last_order_date_join().
 	 *
 	 * @param string[] $pieces Associative array of the clauses for the query.
 	 * @return string[] $pieces Updated associative array of clauses for the query.
 	 */
-	private function orders_table_clauses_low_performance( $pieces ) {
+	private function orders_table_clauses_last_order_date_join( $pieces ) {
 		$order_datastore = wc_get_container()->get( \Automattic\WooCommerce\Internal\DataStores\Orders\OrdersTableDataStore::class );
 		$order_table     = $order_datastore::get_orders_table_name();
 		$meta_table      = $order_datastore::get_meta_table_name();
 
+		// The subscription ID is cast to an integer so the derived table gets an index on it. Joining the BIGINT order
+		// ID against the raw TEXT meta value cannot use an index and forces the derived table to be scanned once per
+		// subscription, which makes this sort take tens of seconds on stores with thousands of subscriptions.
 		$pieces['join'] .= "LEFT JOIN
 				(SELECT
 					MAX( orders.date_created_gmt ) as last_payment,
-					order_meta.meta_value
+					CAST( order_meta.meta_value AS UNSIGNED ) as subscription_id
 				FROM {$meta_table} as order_meta
 				LEFT JOIN {$order_table} orders ON orders.id = order_meta.order_id
 				WHERE order_meta.meta_key = '_subscription_renewal'
-				GROUP BY order_meta.meta_value) lp
-			ON {$order_table}.id = lp.meta_value
-			LEFT JOIN {$order_table} as parent_order on {$order_table}.parent_order_id = parent_order.ID";
-
-		return $pieces;
-	}
-
-	/**
-	 * Adds order table query clauses to sort the subscriptions list table by last payment date.
-	 *
-	 * This function provides a higher performance method using a temporary table to sort by last payment date.
-	 * It is a HPOS version of @see self::posts_clauses_high_performance().
-	 *
-	 * @param string[] $pieces Associative array of the clauses for the query.
-	 * @return string[] $pieces Updated associative array of clauses for the query.
-	 */
-	private function orders_table_clauses_high_performance( $pieces ) {
-		global $wpdb;
-
-		$order_datastore = wc_get_container()->get( \Automattic\WooCommerce\Internal\DataStores\Orders\OrdersTableDataStore::class );
-		$order_table     = $order_datastore::get_orders_table_name();
-		$meta_table      = $order_datastore::get_meta_table_name();
-		$session         = wp_get_session_token();
-
-		$table_name = substr( "{$wpdb->prefix}tmp_{$session}_lastpayment", 0, 64 );
-
-		// Create a temporary table, drop the previous one.
-		//phpcs:disable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$wpdb->query( "DROP TEMPORARY TABLE IF EXISTS {$table_name}" );
-
-		$wpdb->query(
-			"CREATE TEMPORARY TABLE {$table_name} (id INT PRIMARY KEY, last_payment DATETIME) AS
-			SELECT order_meta.meta_value as id, MAX( orders.date_created_gmt ) as last_payment
-			FROM {$meta_table} as order_meta
-			LEFT JOIN {$order_table} as orders ON orders.id = order_meta.order_id
-			WHERE order_meta.meta_key = '_subscription_renewal'
-			GROUP BY order_meta.meta_value"
-		);
-		//phpcs:enable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-
-		$pieces['join'] .= "LEFT JOIN {$table_name} as lp
-			ON {$order_table}.id = lp.id
+				GROUP BY CAST( order_meta.meta_value AS UNSIGNED )) lp
+			ON {$order_table}.id = lp.subscription_id
 			LEFT JOIN {$order_table} as parent_order on {$order_table}.parent_order_id = parent_order.id";
 
 		return $pieces;

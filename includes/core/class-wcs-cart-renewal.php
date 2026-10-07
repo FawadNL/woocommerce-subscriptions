@@ -93,6 +93,14 @@ class WCS_Cart_Renewal {
 			// After order meta is saved, get the order line item ID for the renewal so we can update it later
 			add_action( 'woocommerce_store_api_checkout_update_order_meta', array( &$this, 'set_order_item_id' ) );
 
+			// Coupon codes can remain unchanged while checkout updates their discount or tax.
+			// Refresh those amounts before default-priority checkout callbacks inspect the order.
+			// Core has already synchronized its lines; this refresh and the product-line ID updates are independent.
+			add_action( 'woocommerce_store_api_checkout_update_order_meta', array( $this, 'sync_renewal_order_coupon_totals' ), 5 );
+
+			// Cart API mutations also synchronize the order; refresh coupon amounts without waiting for checkout.
+			add_action( 'woocommerce_store_api_cart_update_order_from_request', array( $this, 'sync_renewal_order_coupon_totals' ), 5 );
+
 			// Don't display cart item key meta stored above on the Edit Order screen
 			add_action( 'woocommerce_hidden_order_itemmeta', array( &$this, 'hidden_order_itemmeta' ), 10 );
 
@@ -470,7 +478,15 @@ class WCS_Cart_Renewal {
 
 				$price = $item_to_renew['line_subtotal'];
 
-				if ( $_product->is_taxable() && $subscription->get_prices_include_tax() ) {
+				if ( $this->is_order_pay_renewal( $cart_item, $subscription ) ) {
+					// Core removes current input tax before applying the customer's current taxes.
+					if ( wc_tax_enabled() && wc_prices_include_tax() && $_product->is_taxable() ) {
+						$rates  = apply_filters( 'woocommerce_adjust_non_base_location_prices', true )
+							? WC_Tax::get_base_tax_rates( $_product->get_tax_class( 'unfiltered' ) )
+							: $this->get_renewal_item_tax_rates( $cart_item_session_data, $key, $item_to_renew['qty'], $price );
+						$price += array_sum( WC_Tax::calc_tax( $price, $rates, false ) );
+					}
+				} elseif ( $_product->is_taxable() && $subscription->get_prices_include_tax() ) {
 
 					// If this item's subtracted tax data hasn't been repaired, do that now.
 					if ( isset( $item_to_renew['_subtracted_base_location_tax'] ) ) {
@@ -505,6 +521,218 @@ class WCS_Cart_Renewal {
 		}
 
 		return $cart_item_session_data;
+	}
+
+	/**
+	 * Match core's filtered customer rates when it removes tax from a fixed gross input.
+	 *
+	 * Reconstruction precedes cart totals, so the calculation-item price is the provisional
+	 * unfiltered gross price. Rate callbacks based on the final price or complete cart state
+	 * cannot be resolved here without changing checkout's existing restoration timing.
+	 *
+	 * @param array  $cart_item    Restored cart item, including extension data.
+	 * @param string $key          Cart item key.
+	 * @param float  $quantity     Quantity from the source order item.
+	 * @param float  $net_subtotal Source order item's net subtotal.
+	 * @return array Valid filtered rates, or the complete unfiltered customer rates.
+	 */
+	private function get_renewal_item_tax_rates( $cart_item, $key, $quantity, $net_subtotal ) {
+		// The provisional filter context gets a clone; the caller sets only the final live price.
+		$product = clone $cart_item['data'];
+		$cart    = WC()->cart;
+		$rates   = WC_Tax::get_rates( $product->get_tax_class(), $cart instanceof WC_Cart ? $cart->get_customer() : WC()->customer );
+
+		if ( ! $cart instanceof WC_Cart ) {
+			return $rates;
+		}
+
+		$price                 = $net_subtotal + array_sum( WC_Tax::calc_tax( $net_subtotal, $rates, false ) );
+		$cart_item['quantity'] = $quantity;
+		$cart_item['data']     = $product;
+		if ( 0 !== (int) $quantity ) {
+			$product->set_price( $price / $quantity );
+		}
+
+		// Keep the context shape and precision used by WC_Cart_Totals::get_items_from_cart().
+		$item           = (object) array(
+			'key'                => $key,
+			'object'             => $cart_item,
+			'tax_class'          => $product->get_tax_class(),
+			'taxable'            => 'taxable' === $product->get_tax_status(),
+			'quantity'           => $quantity,
+			'product'            => $product,
+			'price_includes_tax' => wc_prices_include_tax(),
+			'price'              => wc_add_number_precision_deep( $price ),
+			'subtotal'           => 0,
+			'subtotal_tax'       => 0,
+			'subtotal_taxes'     => array(),
+			'total'              => 0,
+			'total_tax'          => 0,
+			'taxes'              => array(),
+		);
+		$filtered_rates = apply_filters( 'woocommerce_cart_totals_get_item_tax_rates', $rates, $item, $cart );
+
+		if ( ! is_array( $filtered_rates ) ) {
+			return $rates;
+		}
+
+		foreach ( $filtered_rates as $rate ) {
+			if ( ! is_array( $rate ) || ! isset( $rate['rate'], $rate['compound'] )
+				|| ! is_numeric( $rate['rate'] ) || ! is_finite( (float) $rate['rate'] ) || 0 > $rate['rate']
+				|| ! in_array( $rate['compound'], array( 'yes', 'no' ), true ) ) {
+				return $rates;
+			}
+		}
+
+		return $filtered_rates;
+	}
+
+	/**
+	 * Distinguish payment of an existing renewal from adjacent shared cart flows.
+	 *
+	 * @param array    $cart_item Cart item resolved through the owning handler.
+	 * @param WC_Order $order     Source order resolved through the owning handler.
+	 * @return bool
+	 */
+	private function is_order_pay_renewal( $cart_item, $order ) {
+		return 'subscription_renewal' === $this->cart_item_key
+			&& is_array( $cart_item )
+			&& isset( $cart_item['subscription_renewal'] )
+			&& is_array( $cart_item['subscription_renewal'] )
+			&& empty( $cart_item['subscription_renewal']['subscription_renewal_early'] )
+			&& ! isset( $cart_item['subscription_initial_payment'] )
+			&& ! isset( $cart_item['subscription_resubscribe'] )
+			&& ! isset( $cart_item['subscription_switch'] )
+			&& $order instanceof WC_Order
+			&& ! wcs_is_subscription( $order )
+			&& $order->has_status( array( 'pending', 'failed' ) )
+			&& wcs_order_contains_renewal( $order )
+			&& ! wcs_order_contains_early_renewal( $order );
+	}
+
+	/**
+	 * Check whether fallback discounts should use the current store price-entry mode.
+	 *
+	 * Setup runs in the shared pre-redirect cart context, so this deliberately does
+	 * not require Store API context. The passed order remains authoritative while
+	 * all renewal cart rows must identify that ordinary payable renewal.
+	 *
+	 * @param WC_Order $order Renewal order whose discounts are being restored.
+	 * @return bool
+	 */
+	private function should_use_current_price_mode_for_fallback_coupons( $order ) {
+		if ( ! WC()->cart instanceof WC_Cart || ! WC()->session || ! $order instanceof WC_Order ) {
+			return false;
+		}
+
+		if ( wcs_is_subscription( $order ) || ! $order->has_status( array( 'pending', 'failed' ) ) || ! wcs_order_contains_renewal( $order ) || wcs_order_contains_early_renewal( $order ) ) {
+			return false;
+		}
+
+		$renewal_order_ids = array();
+		$subscription_ids  = array();
+		foreach ( WC()->cart->get_cart() as $candidate ) {
+			if ( ! is_array( $candidate ) ) {
+				return false;
+			}
+
+			if ( isset( $candidate['subscription_initial_payment'] )
+				|| isset( $candidate['subscription_resubscribe'] )
+				|| isset( $candidate['subscription_switch'] )
+			) {
+				return false;
+			}
+
+			if ( ! array_key_exists( 'subscription_renewal', $candidate ) ) {
+				continue;
+			}
+
+			if ( ! $this->is_order_pay_renewal( $candidate, $order )
+				|| ! isset( $candidate['subscription_renewal']['renewal_order_id'] )
+				|| ! isset( $candidate['subscription_renewal']['subscription_id'] )
+			) {
+				return false;
+			}
+
+			$renewal_order_id = $this->normalize_order_pay_id( $candidate['subscription_renewal']['renewal_order_id'] );
+			$subscription_id  = $this->normalize_order_pay_id( $candidate['subscription_renewal']['subscription_id'] );
+			if ( false === $renewal_order_id || false === $subscription_id || $renewal_order_id !== $order->get_id() ) {
+				return false;
+			}
+
+			$renewal_order_ids[ $renewal_order_id ] = true;
+			$subscription_ids[ $subscription_id ]   = true;
+		}
+
+		return 1 === count( $renewal_order_ids ) && 1 === count( $subscription_ids );
+	}
+
+	/**
+	 * Normalize a cart order/subscription identifier without truncating fractions.
+	 *
+	 * @param mixed $value Identifier candidate.
+	 * @return int|false Positive integer, or false when invalid.
+	 */
+	private function normalize_order_pay_id( $value ) {
+		if ( ! is_numeric( $value ) || ! is_finite( (float) $value ) ) {
+			return false;
+		}
+
+		$value = (float) $value;
+		$id    = (int) $value;
+
+		return $id > 0 && (float) $id === $value ? $id : false;
+	}
+
+	/**
+	 * Refresh coupon financials after Store API has synchronized the renewal order.
+	 *
+	 * Core's coupon hash contains codes, so an unchanged code may retain old amounts
+	 * after a location or cart change. Current cart discounts and discount taxes are
+	 * authoritative, including over financial values set by coupon-creation callbacks.
+	 * Preserve existing item identity and metadata without replaying creation hooks.
+	 * Only changed coupon items are saved; the order's aggregate totals are not changed.
+	 *
+	 * @since 9.3.0
+	 * @param WC_Order $order Order updated by a Store API cart or checkout request.
+	 */
+	public function sync_renewal_order_coupon_totals( $order ) {
+		if ( ! $order instanceof WC_Order || ! WC()->cart || ! WC()->session ) {
+			return;
+		}
+
+		if ( $order->get_id() !== (int) WC()->session->get( 'store_api_draft_order' ) ) {
+			return;
+		}
+
+		$cart_item = $this->cart_contains();
+		if ( ! $this->is_order_pay_renewal( $cart_item, $order ) ) {
+			return;
+		}
+
+		$cart_order = $this->get_order( $cart_item );
+		if ( ! $cart_order instanceof WC_Order || $cart_order->get_id() !== $order->get_id() ) {
+			return;
+		}
+
+		foreach ( $order->get_items( 'coupon' ) as $coupon_item ) {
+			if ( ! $coupon_item instanceof WC_Order_Item_Coupon ) {
+				continue;
+			}
+
+			$code = $coupon_item->get_code();
+			if ( ! WC()->cart->has_discount( $code ) ) {
+				continue;
+			}
+
+			$discount     = WC()->cart->get_coupon_discount_amount( $code );
+			$discount_tax = WC()->cart->get_coupon_discount_tax_amount( $code );
+			if ( (float) $coupon_item->get_discount() !== (float) $discount || (float) $coupon_item->get_discount_tax() !== (float) $discount_tax ) {
+				$coupon_item->set_discount( $discount );
+				$coupon_item->set_discount_tax( $discount_tax );
+				$coupon_item->save();
+			}
+		}
 	}
 
 	/**
@@ -544,6 +772,12 @@ class WCS_Cart_Renewal {
 		$getter = "get_{$key}";
 
 		if ( array_key_exists( $key, $address_fields ) && is_callable( [ $order, $getter ] ) ) {
+			// A paying customer who does not own the subscription, such as a gift recipient, is billed as
+			// themselves: leave their billing fields to WooCommerce, which fills them from their own profile.
+			if ( 0 === strpos( $key, 'billing_' ) && $this->is_checkout_by_non_owner() ) {
+				return $value;
+			}
+
 			$order_value = call_user_func( [ $order, $getter ] );
 
 			// Given this is fetching the value for a checkout field, we need to ensure the value is a scalar.
@@ -553,6 +787,34 @@ class WCS_Cart_Renewal {
 		}
 
 		return $value;
+	}
+
+	/**
+	 * Checks whether the customer at the checkout is logged in but does not own the subscription in the cart.
+	 *
+	 * A gift recipient can pay a renewal, or renew early, without owning the subscription. Their checkout
+	 * shows and saves their own billing contact, not the owner's. A logged-out customer, a cart item that
+	 * carries no subscription, or a subscription that cannot be loaded all count as the owner, so the
+	 * order's details are used as before.
+	 *
+	 * @return bool
+	 * @since 9.3.0
+	 */
+	private function is_checkout_by_non_owner() {
+		if ( ! is_user_logged_in() ) {
+			return false;
+		}
+
+		$cart_item       = $this->cart_contains();
+		$subscription_id = ( false !== $cart_item && isset( $cart_item[ $this->cart_item_key ]['subscription_id'] ) ) ? absint( $cart_item[ $this->cart_item_key ]['subscription_id'] ) : 0;
+
+		if ( ! $subscription_id ) {
+			return false;
+		}
+
+		$subscription = wcs_get_subscription( $subscription_id );
+
+		return $subscription && ! $this->customer_owns_subscription( $subscription, get_current_user_id() );
 	}
 
 	/**
@@ -990,9 +1252,11 @@ class WCS_Cart_Renewal {
 	}
 
 	/**
-	 * Before allowing payment on an order awaiting payment via checkout, WC >= 2.6 validates
-	 * order items haven't changed by checking for a cart hash on the order, so we need to set
-	 * that here. @see WC_Checkout::create_order()
+	 * Set the cart hash for legacy checkout's reuse of an order awaiting payment.
+	 *
+	 * Matching ordinary Store API renewals defer this write: core needs a stale hash
+	 * to detect and synchronize changed product lines before it saves the current hash.
+	 * Other checkout contexts retain the hash update used by WC_Checkout::create_order().
 	 *
 	 * @param WC_Order|int $order The order object or order ID.
 	 *
@@ -1004,6 +1268,17 @@ class WCS_Cart_Renewal {
 			$order = wc_get_order( $order );
 
 			if ( ! $order ) {
+				return;
+			}
+		}
+
+		// Store API uses a hash mismatch to decide whether the existing order needs its lines refreshed.
+		// Leave an ordinary payable renewal stale until core has synchronized it from the cart.
+		if ( WC()->cart instanceof WC_Cart && 'store-api' === WC()->cart->cart_context ) {
+			$cart_item  = $this->cart_contains();
+			$cart_order = is_array( $cart_item ) ? $this->get_order( $cart_item ) : false;
+
+			if ( $cart_order instanceof WC_Order && $cart_order->get_id() === $order->get_id() && $this->is_order_pay_renewal( $cart_item, $order ) ) {
 				return;
 			}
 		}
@@ -1180,12 +1455,15 @@ class WCS_Cart_Renewal {
 	}
 
 	/**
-	 * When completing checkout for a subscription renewal, update the subscription's address to match
-	 * the shipping/billing address entered on checkout.
+	 * When completing checkout for a subscription renewal, update the subscription's addresses from the checkout.
+	 *
+	 * The shipping address is updated for whoever pays. The billing address is updated only when the paying
+	 * customer owns the subscription, so a gift recipient's checkout leaves the purchaser's billing contact alone.
 	 *
 	 * @param int $customer_id
 	 * @param array $checkout_data the posted checkout data
 	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v2.2.7
+	 * @since 9.3.0 The billing address is updated only for the subscription's owner.
 	 */
 	public function maybe_update_subscription_address_data( $customer_id, $checkout_data ) {
 		$cart_renewal_item = $this->cart_contains();
@@ -1198,8 +1476,9 @@ class WCS_Cart_Renewal {
 			}
 
 			$subscription_updated = false;
+			$address_types        = $this->customer_owns_subscription( $subscription, $customer_id ) ? [ 'billing', 'shipping' ] : [ 'shipping' ];
 
-			foreach ( [ 'billing', 'shipping' ] as $address_type ) {
+			foreach ( $address_types as $address_type ) {
 				$checkout_fields = WC()->checkout()->get_checkout_fields( $address_type );
 
 				if ( is_array( $checkout_fields ) ) {
@@ -1219,12 +1498,15 @@ class WCS_Cart_Renewal {
 	}
 
 	/**
-	 * When completing checkout for a subscription renewal, update the subscription's address to match
-	 * the shipping/billing address entered on checkout.
+	 * When completing a Store API checkout for a subscription renewal, update the subscription's addresses from the request.
+	 *
+	 * The shipping address is updated for whoever pays. The billing address is updated only when the paying
+	 * customer owns the subscription, so a gift recipient's checkout leaves the purchaser's billing contact alone.
 	 *
 	 * @param \WC_Customer $customer
 	 * @param \WP_REST_Request $request Full details about the request.
 	 * @since 4.1.1
+	 * @since 9.3.0 The billing address is updated only for the subscription's owner.
 	 */
 	public function maybe_update_subscription_address_data_from_store_api( $customer, $request ) {
 		$cart_renewal_item = $this->cart_contains();
@@ -1243,17 +1525,44 @@ class WCS_Cart_Renewal {
 				}
 			}
 
+			$update_billing = $this->customer_owns_subscription( $subscription, $customer->get_id() );
+
 			// Save Billing & Shipping addresses. Billing address is a required field, if shipping address (optional field) was not provided, set it to the given billing address.
 			if ( wcs_is_woocommerce_pre( '7.1' ) ) {
-				$subscription->set_address( $request['billing_address'], 'billing' );
+				if ( $update_billing ) {
+					$subscription->set_address( $request['billing_address'], 'billing' );
+				}
+
 				$subscription->set_address( $request['shipping_address'] ?? $request['billing_address'], 'shipping' );
 			} else {
-				$subscription->set_billing_address( $request['billing_address'] );
+				if ( $update_billing ) {
+					$subscription->set_billing_address( $request['billing_address'] );
+				}
+
 				$subscription->set_shipping_address( $request['shipping_address'] ?? $request['billing_address'] );
 
 				$subscription->save();
 			}
 		}
+	}
+
+	/**
+	 * Checks whether the customer completing a renewal checkout owns the subscription.
+	 *
+	 * Someone other than the owner can pay a renewal at checkout, such as the recipient of a gifted
+	 * subscription. Their billing details must not replace the subscription's billing contact, which
+	 * belongs to the owner, so only the owner's checkout updates the subscription's billing address.
+	 * This is the same rule as WC_Subscriptions_Addresses::can_user_edit_subscription_address() applies on My Account.
+	 *
+	 * @param WC_Subscription $subscription The subscription being renewed.
+	 * @param int             $customer_id  ID of the customer completing checkout. Zero or empty is never the owner.
+	 * @return bool
+	 * @since 9.3.0
+	 */
+	protected function customer_owns_subscription( $subscription, $customer_id ) {
+		$customer_id = absint( $customer_id );
+
+		return $customer_id > 0 && absint( $subscription->get_user_id() ) === $customer_id;
 	}
 
 	/**
@@ -1397,7 +1706,9 @@ class WCS_Cart_Renewal {
 	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v2.4.3
 	 */
 	public function setup_discounts( $order ) {
-		$prices_include_tax = $order->get_prices_include_tax();
+		$prices_include_tax = $this->should_use_current_price_mode_for_fallback_coupons( $order )
+			? wc_prices_include_tax()
+			: $order->get_prices_include_tax();
 		$order_discount     = $order->get_total_discount( ! $prices_include_tax );
 		$coupon_items       = $order->get_items( 'coupon' );
 
@@ -1466,10 +1777,13 @@ class WCS_Cart_Renewal {
 				$order    = $coupon_item->get_order();
 				$discount = (float) $coupon_item->get_discount();
 
-				// Pseudo coupon amounts are applied to the cart in the order's price-entry basis,
-				// so when the order's prices include tax, the stored tax-exclusive discount needs
-				// its tax added back. Mirrors the basis handling in setup_discounts().
-				if ( $order && $order->get_prices_include_tax() ) {
+				// Supported order-pay renewals use the current store's price-entry mode.
+				// Excluded and unsafe contexts retain the persisted order's mode.
+				$prices_include_tax = false;
+				if ( $order ) {
+					$prices_include_tax = $this->should_use_current_price_mode_for_fallback_coupons( $order ) ? wc_prices_include_tax() : $order->get_prices_include_tax();
+				}
+				if ( $prices_include_tax ) {
 					$discount += (float) $coupon_item->get_discount_tax();
 				}
 
@@ -1523,8 +1837,8 @@ class WCS_Cart_Renewal {
 	protected function apply_order_coupon( $order, $coupon ) {
 		$coupon_code = $coupon->get_code();
 
-		// Set order products as the product ids on the coupon if the coupon does not already have usage restrictions for some products
-		if ( ! $coupon->get_product_ids() ) {
+		// Set order products as the product IDs only when the coupon has no positive product or category restrictions.
+		if ( ! $coupon->get_product_ids() && ! $coupon->get_product_categories() ) {
 			$coupon->set_product_ids( $this->get_products( $order ) );
 		}
 
@@ -1880,8 +2194,10 @@ class WCS_Cart_Renewal {
 					// Now that we have a coupon we know we want to apply
 					if ( ! empty( $coupon_code ) ) {
 
-						// Set renewal order products as the product ids on the coupon
-						wcs_set_coupon_property( $coupon, 'product_ids', $this->get_products( $order ) );
+						// Set renewal order products as the product ids only when the coupon has no positive product or category restrictions
+						if ( ! wcs_get_coupon_property( $coupon, 'product_ids' ) && ! wcs_get_coupon_property( $coupon, 'product_categories' ) ) {
+							wcs_set_coupon_property( $coupon, 'product_ids', $this->get_products( $order ) );
+						}
 
 						// Store the coupon info for later
 						$this->store_coupon( wcs_get_objects_property( $order, 'id' ), $coupon );

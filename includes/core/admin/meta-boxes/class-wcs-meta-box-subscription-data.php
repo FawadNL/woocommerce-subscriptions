@@ -421,17 +421,24 @@ class WCS_Meta_Box_Subscription_Data extends WC_Meta_Box_Order_Data {
 
 		// Save the linked parent order ID.
 		if ( ! empty( $_POST['parent-order-id'] ) ) {
-			$parent_order_id = wc_clean( wp_unslash( $_POST['parent-order-id'] ) );
-			// If the parent order to be set is a renewal order.
-			if ( wcs_order_contains_renewal( $parent_order_id ) ) {
-				// remove renewal order meta flag.
-				$parent = wc_get_order( $parent_order_id );
-				wcs_delete_objects_property( $parent, 'subscription_renewal' );
+			$parent_order_id = absint( wp_unslash( $_POST['parent-order-id'] ) );
+			$parent          = $parent_order_id ? wc_get_order( $parent_order_id ) : false;
+
+			// The order to link to is chosen by the request, so it needs authorizing in its own right. It also has to
+			// be an order: wc_get_order() resolves a subscription ID too, and 'edit_shop_order' passes for one.
+			if ( ! $parent || 'shop_order' !== $parent->get_type() || ! current_user_can( 'edit_shop_order', $parent_order_id ) ) {
+				wcs_add_admin_notice( __( 'The order you selected could not be linked to this subscription as its parent order. No parent order was set.', 'woocommerce-subscriptions' ), 'error' );
+			} else {
+				// If the parent order to be set is a renewal order, remove the renewal order meta flag.
+				if ( wcs_order_contains_renewal( $parent_order_id ) ) {
+					wcs_delete_objects_property( $parent, 'subscription_renewal' );
+				}
+
+				$subscription->set_parent_id( $parent_order_id );
+				// translators: %s: parent order number (linked to its details screen).
+				$subscription->add_order_note( sprintf( _x( 'Subscription linked to parent order %s via admin.', 'subscription note after linking to a parent order', 'woocommerce-subscriptions' ), sprintf( '<a href="%1$s">#%2$s</a> ', esc_url( wcs_get_edit_post_link( $parent_order_id ) ), $parent->get_order_number() ) ), false, true );
+				$subscription->save();
 			}
-			$subscription->set_parent_id( $parent_order_id );
-			// translators: %s: parent order number (linked to its details screen).
-			$subscription->add_order_note( sprintf( _x( 'Subscription linked to parent order %s via admin.', 'subscription note after linking to a parent order', 'woocommerce-subscriptions' ), sprintf( '<a href="%1$s">#%2$s</a> ', esc_url( wcs_get_edit_post_link( $subscription->get_parent_id() ) ), $subscription->get_parent()->get_order_number() ) ), false, true );
-			$subscription->save();
 		}
 
 		try {
@@ -439,7 +446,7 @@ class WCS_Meta_Box_Subscription_Data extends WC_Meta_Box_Order_Data {
 			$order_status = wc_clean( wp_unslash( $_POST['order_status'] ?? '' ) );
 
 			if ( 'cancelled' === $order_status ) {
-				$subscription->cancel_order();
+				$subscription->maybe_cancel();
 			} else {
 				$subscription->update_status( $order_status, '', true );
 			}

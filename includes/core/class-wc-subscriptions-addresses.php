@@ -31,7 +31,7 @@ class WC_Subscriptions_Addresses {
 		add_action( 'woocommerce_customer_save_address', __CLASS__ . '::maybe_update_subscription_addresses', 10, 2 );
 		add_action( 'woocommerce_save_account_details', __CLASS__ . '::maybe_update_subscription_addresses_contact' );
 
-		add_filter( 'woocommerce_address_to_edit', __CLASS__ . '::maybe_populate_subscription_addresses', 10 );
+		add_filter( 'woocommerce_address_to_edit', __CLASS__ . '::maybe_populate_subscription_addresses', 10, 2 );
 
 		add_filter( 'woocommerce_get_breadcrumb', __CLASS__ . '::change_addresses_breadcrumb', 10, 1 );
 	}
@@ -39,16 +39,50 @@ class WC_Subscriptions_Addresses {
 	/**
 	 * Checks if a user can edit a subscription's address.
 	 *
+	 * The 'view_order' capability is a read capability, and it is granted to people who do not own the subscription:
+	 * gifting grants it to the recipient of a gifted subscription, for example. Only the subscription's owner may
+	 * edit anything other than its shipping address.
+	 *
 	 * @param int|WC_Subscription $subscription Post ID of a 'shop_subscription' post, or instance of a WC_Subscription object.
 	 * @param int                 $user_id      The ID of a user.
+	 * @param string              $address_type The address type being edited: 'billing' or 'shipping'. An unrecognised
+	 *                                          or empty type is treated as the more restrictive 'billing' case.
 	 * @return bool Whether the user can edit the subscription's address.
 	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v3.0.15
+	 * @since 9.2.0 Added the $address_type parameter.
 	 */
-	private static function can_user_edit_subscription_address( $subscription, $user_id = 0 ) {
+	private static function can_user_edit_subscription_address( $subscription, $user_id = 0, $address_type = '' ) {
 		$subscription = wcs_get_subscription( $subscription );
 		$user_id      = empty( $user_id ) ? get_current_user_id() : absint( $user_id );
 
-		return $subscription ? user_can( $user_id, 'view_order', $subscription->get_id() ) : false;
+		if ( ! $subscription || $user_id <= 0 ) {
+			return false;
+		}
+
+		if ( 'shipping' !== $address_type && (int) $subscription->get_user_id() !== $user_id ) {
+			return false;
+		}
+
+		return user_can( $user_id, 'view_order', $subscription->get_id() );
+	}
+
+	/**
+	 * Determines which address type the customer is currently editing.
+	 *
+	 * @return string 'billing', 'shipping', or an empty string if neither can be determined.
+	 * @since 9.2.0
+	 */
+	private static function get_edit_address_type() {
+		global $wp;
+
+		$address_type = '';
+
+		if ( ! empty( $wp->query_vars['edit-address'] ) && is_string( $wp->query_vars['edit-address'] ) ) {
+			// The endpoint value can be a translated slug, so map it back to its canonical form.
+			$address_type = wc_edit_address_i18n( sanitize_title( $wp->query_vars['edit-address'] ), true );
+		}
+
+		return in_array( $address_type, array( 'billing', 'shipping' ), true ) ? $address_type : '';
 	}
 
 	/**
@@ -77,11 +111,11 @@ class WC_Subscriptions_Addresses {
 	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v3.0.15
 	 */
 	public static function maybe_restrict_edit_address_endpoint() {
-		if ( ! is_wc_endpoint_url() || 'edit-address' !== WC()->query->get_current_endpoint() || ! isset( $_GET['subscription'] ) ) {
+		if ( ! is_wc_endpoint_url() || 'edit-address' !== WC()->query->get_current_endpoint() || ! isset( $_GET['subscription'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 			return;
 		}
 
-		if ( ! self::can_user_edit_subscription_address( absint( $_GET['subscription'] ) ) ) {
+		if ( ! self::can_user_edit_subscription_address( absint( $_GET['subscription'] ), 0, self::get_edit_address_type() ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 			wc_add_notice( 'Invalid subscription.', 'error' );
 			wp_safe_redirect( wc_get_account_endpoint_url( 'dashboard' ) );
 			exit();
@@ -104,7 +138,7 @@ class WC_Subscriptions_Addresses {
 		if ( wcs_user_has_subscription() ) {
 			$subscription_id = isset( $_GET['subscription'] ) ? absint( $_GET['subscription'] ) : 0;
 
-			if ( $subscription_id && self::can_user_edit_subscription_address( $subscription_id ) ) {
+			if ( $subscription_id && self::can_user_edit_subscription_address( $subscription_id, 0, self::get_edit_address_type() ) ) {
 
 				echo '<p>' . esc_html__( 'Both the shipping address used for the subscription and your default shipping address for future purchases will be updated.', 'woocommerce-subscriptions' ) . '</p>';
 
@@ -230,6 +264,12 @@ class WC_Subscriptions_Addresses {
 
 		// Update the billing contact info for each active subscription
 		foreach ( $users_subscriptions as $subscription ) {
+			// This list also contains subscriptions the user doesn't own -- those gifted to them, for instance -- whose
+			// billing contact is the purchaser's, not theirs.
+			if ( ! self::can_user_edit_subscription_address( $subscription, $user_id, 'billing' ) ) {
+				continue;
+			}
+
 			if ( $subscription->has_status( array( 'active', 'on-hold' ) ) ) {
 				// Update the billing address with the new contact information
 				wcs_set_order_address( $subscription, $contact_info, 'billing' );
@@ -271,6 +311,10 @@ class WC_Subscriptions_Addresses {
 			$users_subscriptions = wcs_get_users_subscriptions( $user_id );
 
 			foreach ( $users_subscriptions as $subscription ) {
+				if ( ! self::can_user_edit_subscription_address( $subscription, $user_id, $address_type ) ) {
+					continue;
+				}
+
 				if ( $subscription->has_status( array( 'active', 'on-hold' ) ) ) {
 					wcs_set_order_address( $subscription, $address, $address_type );
 					$subscription->add_order_note( $address_update_note );
@@ -281,7 +325,7 @@ class WC_Subscriptions_Addresses {
 			$subscription = wcs_get_subscription( absint( $_POST['update_subscription_address'] ) );
 
 			// Update the address only if the user actually owns the subscription
-			if ( $subscription && self::can_user_edit_subscription_address( $subscription->get_id() ) ) {
+			if ( $subscription && self::can_user_edit_subscription_address( $subscription->get_id(), 0, $address_type ) ) {
 				wcs_set_order_address( $subscription, $address, $address_type );
 				$subscription->add_order_note( $address_update_note );
 				$subscription->save();
@@ -295,13 +339,14 @@ class WC_Subscriptions_Addresses {
 	/**
 	 * Prepopulate the address fields on a subscription item
 	 *
-	 * @param array $address A WooCommerce address array
+	 * @param array  $address      A WooCommerce address array
+	 * @param string $address_type The address type being edited: 'billing' or 'shipping'.
 	 * @since 1.0.0 - Migrated from WooCommerce Subscriptions v1.5
 	 */
-	public static function maybe_populate_subscription_addresses( $address ) {
+	public static function maybe_populate_subscription_addresses( $address, $address_type = '' ) {
 		$subscription_id = isset( $_GET['subscription'] ) ? absint( $_GET['subscription'] ) : 0;
 
-		if ( $subscription_id && self::can_user_edit_subscription_address( $subscription_id ) ) {
+		if ( $subscription_id && self::can_user_edit_subscription_address( $subscription_id, 0, $address_type ) ) {
 			$subscription = wcs_get_subscription( $subscription_id );
 
 			foreach ( array_keys( $address ) as $key ) {

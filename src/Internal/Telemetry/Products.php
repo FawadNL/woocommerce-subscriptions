@@ -62,14 +62,14 @@ class Products {
 			$wpdb->prepare(
 				"
 					SELECT     COUNT(*)
-					FROM       %i AS product
+					FROM       $wpdb->posts AS product
 					-- Reduce the result set to products of the `subscription` and `variable_subscription` product types.
 					INNER JOIN (
 						SELECT     product_post.ID,
 								   product_type.term_taxonomy_id,
 								   product_post.post_status
-						FROM       %i AS product_post
-						INNER JOIN %i AS product_type ON (
+						FROM       $wpdb->posts AS product_post
+						INNER JOIN $wpdb->term_relationships AS product_type ON (
 							product_type.object_id = product_post.ID
 							AND product_type.term_taxonomy_id IN ( %d, %d )
 						)
@@ -79,7 +79,7 @@ class Products {
 						OR ( product.post_parent = p.ID AND p.term_taxonomy_id = %d )
 					)
 					-- Get the product's own gifting value, if it has one.
-					LEFT JOIN %i AS gifting_setting ON (
+					LEFT JOIN $wpdb->postmeta AS gifting_setting ON (
 						gifting_setting.post_id = product.ID
 						AND gifting_setting.meta_key = '_subscription_gifting'
 					)
@@ -88,14 +88,10 @@ class Products {
 						  AND p.post_status = 'publish'
 						  AND $atomic_gifting_condition
 				",
-				$wpdb->posts,
-				$wpdb->posts,
-				$wpdb->term_relationships,
 				$subscription_product_term_ids['subscription'],
 				$subscription_product_term_ids['variable_subscription'],
 				$subscription_product_term_ids['subscription'],
-				$subscription_product_term_ids['variable_subscription'],
-				$wpdb->postmeta
+				$subscription_product_term_ids['variable_subscription']
 			)
 		);
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -160,14 +156,14 @@ class Products {
 					SELECT     billing_period.meta_value AS period,
 					           billing_interval.meta_value AS `interval`,
 					           COUNT(*) AS count
-					FROM       %i AS product
+					FROM       $wpdb->posts AS product
 					-- Reduce the result set to products of the `subscription` and `variable_subscription` product types.
 					INNER JOIN (
 					    SELECT     product_post.ID,
 					               product_type.term_taxonomy_id,
 					               product_post.post_status
-					    FROM       %i AS product_post
-					    INNER JOIN %i AS product_type ON (
+					    FROM       $wpdb->posts AS product_post
+					    INNER JOIN $wpdb->term_relationships AS product_type ON (
 					        product_type.object_id = product_post.ID
 					        AND product_type.term_taxonomy_id IN ( %d, %d )
 					    )
@@ -177,12 +173,12 @@ class Products {
 					    OR ( product.post_parent = subscription_product.ID AND subscription_product.term_taxonomy_id = %d )
 					)
 					-- Obtain the billing period interval (usually an integer, or string representation of an integer).
-					LEFT JOIN %i AS billing_interval ON (
+					LEFT JOIN $wpdb->postmeta AS billing_interval ON (
 					    billing_interval.post_id = product.ID
 					    AND billing_interval.meta_key = '_subscription_period_interval'
 					)
 					-- Obtain the billing period (usually one of 'day', 'week', 'month', 'year').
-					LEFT JOIN %i AS billing_period ON (
+					LEFT JOIN $wpdb->postmeta AS billing_period ON (
 					    billing_period.post_id = product.ID
 					    AND billing_period.meta_key = '_subscription_period'
 					)
@@ -196,15 +192,10 @@ class Products {
 					          billing_period.meta_value ASC,
 					          billing_interval.meta_value DESC
 				",
-				$wpdb->posts,
-				$wpdb->posts,
-				$wpdb->term_relationships,
 				$subscription_product_term_ids['subscription'],
 				$subscription_product_term_ids['variable_subscription'],
 				$subscription_product_term_ids['subscription'],
-				$subscription_product_term_ids['variable_subscription'],
-				$wpdb->postmeta,
-				$wpdb->postmeta,
+				$subscription_product_term_ids['variable_subscription']
 			)
 		);
 

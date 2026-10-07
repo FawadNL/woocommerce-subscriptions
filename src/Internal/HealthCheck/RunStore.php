@@ -57,6 +57,17 @@ class RunStore {
 	private const LATEST_SCAN_RUN_ID_OPTION = 'wcs_health_check_latest_scan_run_id';
 
 	/**
+	 * The prefixed name of the runs table.
+	 *
+	 * @return string
+	 */
+	private function get_table_name(): string {
+		global $wpdb;
+
+		return $wpdb->prefix . 'wcs_health_check_runs';
+	}
+
+	/**
 	 * Insert a new run row if and only if no run of the same `type` is
 	 * currently `running`, returning its database id. Returns 0 when
 	 * the insert was rejected (a concurrent caller already holds the
@@ -88,6 +99,8 @@ class RunStore {
 	 */
 	public function start( string $type, string $triggered_by ): int {
 		global $wpdb;
+
+		$table = $this->get_table_name();
 
 		// Atomicity is implemented via a MySQL named session lock
 		// rather than an `INSERT ... SELECT ... WHERE NOT EXISTS
@@ -122,8 +135,7 @@ class RunStore {
 			// serialised on the same named lock.
 			$existing = $wpdb->get_var(
 				$wpdb->prepare(
-					'SELECT 1 FROM %i WHERE type = %s AND status = %s LIMIT 1',
-					$wpdb->prefix . 'wcs_health_check_runs',
+					"SELECT 1 FROM $table WHERE type = %s AND status = %s LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 					$type,
 					self::STATUS_RUNNING
 				)
@@ -134,7 +146,7 @@ class RunStore {
 			}
 
 			$inserted = $wpdb->insert(
-				$wpdb->prefix . 'wcs_health_check_runs',
+				$table,
 				array(
 					'type'         => $type,
 					'started_at'   => current_time( 'mysql', true ),
@@ -184,7 +196,7 @@ class RunStore {
 		// silently overwrite the `cancelled` row back to `completed`, defeating the cancellation.
 		// Mirrors the guard already in place on `cancel()` and `fail()`.
 		$result = $wpdb->update(
-			$wpdb->prefix . 'wcs_health_check_runs',
+			$this->get_table_name(),
 			array(
 				'status'       => self::STATUS_COMPLETED,
 				'completed_at' => current_time( 'mysql', true ),
@@ -236,7 +248,7 @@ class RunStore {
 		// row to `failed` and bump the circuit-breaker counter for an event the merchant
 		// already intentionally aborted.
 		$result = $wpdb->update(
-			$wpdb->prefix . 'wcs_health_check_runs',
+			$this->get_table_name(),
 			array(
 				'status'        => self::STATUS_FAILED,
 				'completed_at'  => current_time( 'mysql', true ),
@@ -288,7 +300,7 @@ class RunStore {
 		global $wpdb;
 
 		$result = $wpdb->update(
-			$wpdb->prefix . 'wcs_health_check_runs',
+			$this->get_table_name(),
 			array(
 				'status'       => self::STATUS_CANCELLED,
 				'completed_at' => current_time( 'mysql', true ),
@@ -324,10 +336,11 @@ class RunStore {
 	public function get( int $run_id ): ?array {
 		global $wpdb;
 
+		$table = $this->get_table_name();
+
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT * FROM %i WHERE id = %d',
-				$wpdb->prefix . 'wcs_health_check_runs',
+				"SELECT * FROM $table WHERE id = %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				$run_id
 			),
 			ARRAY_A
@@ -377,13 +390,15 @@ class RunStore {
 	public function get_latest_terminal_run(): ?array {
 		global $wpdb;
 
+		$table = $this->get_table_name();
+
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT * FROM %i
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				"SELECT * FROM $table
 				 WHERE type = %s AND status IN ( %s, %s, %s )
 				 ORDER BY id DESC
-				 LIMIT 1',
-				$wpdb->prefix . 'wcs_health_check_runs',
+				 LIMIT 1",
 				self::TYPE_SCAN,
 				self::STATUS_COMPLETED,
 				self::STATUS_FAILED,
@@ -434,13 +449,15 @@ class RunStore {
 	public function get_in_flight_scan(): ?array {
 		global $wpdb;
 
+		$table = $this->get_table_name();
+
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT * FROM %i
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				"SELECT * FROM $table
 				 WHERE type = %s AND status = %s
 				 ORDER BY id DESC
-				 LIMIT 1',
-				$wpdb->prefix . 'wcs_health_check_runs',
+				 LIMIT 1",
 				self::TYPE_SCAN,
 				self::STATUS_RUNNING
 			),
@@ -479,7 +496,7 @@ class RunStore {
 
 		if ( '' !== $auto_fail_reason ) {
 			$updated = $wpdb->update(
-				$wpdb->prefix . 'wcs_health_check_runs',
+				$this->get_table_name(),
 				array(
 					'status'        => self::STATUS_FAILED,
 					'completed_at'  => current_time( 'mysql', true ),

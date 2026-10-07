@@ -16,6 +16,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 class WCS_Download_Handler {
+	/**
+	 * Subscription meta storing permission IDs to revoke during the next permission sync.
+	 */
+	private const PENDING_DOWNLOAD_PERMISSION_REVOCATIONS_META_KEY = '_woocommerce_subscriptions_pending_download_permission_revocations';
 
 	/**
 	 * Initialize filters and hooks for class.
@@ -24,6 +28,7 @@ class WCS_Download_Handler {
 	 */
 	public static function init() {
 		add_action( 'woocommerce_grant_product_download_permissions', __CLASS__ . '::save_downloadable_product_permissions' );
+		add_action( 'woocommerce_before_delete_order_item', __CLASS__ . '::queue_download_permissions_for_deleted_subscription_item' );
 
 		add_filter( 'woocommerce_get_item_downloads', __CLASS__ . '::get_item_downloads', 10, 3 );
 
@@ -60,6 +65,11 @@ class WCS_Download_Handler {
 		global $wpdb;
 		$order = wc_get_order( $order_id );
 
+		if ( wcs_is_subscription( $order ) ) {
+			self::revoke_pending_download_permissions( $order );
+			return;
+		}
+
 		if ( wcs_order_contains_subscription( $order, 'any' ) ) {
 			$subscriptions = wcs_get_subscriptions_for_order( $order, array( 'order_type' => array( 'any' ) ) );
 		} else {
@@ -87,7 +97,178 @@ class WCS_Download_Handler {
 			}
 
 			$subscription->get_data_store()->set_download_permissions_granted( $subscription, true );
+			self::revoke_pending_download_permissions( $subscription );
 		}
+	}
+
+	/**
+	 * Queue downloadable product permissions for revocation during the next permission sync.
+	 *
+	 * @internal This method is public only so that it can be invoked via action hooks, but is not intended for use by plugins
+	 *           and may be removed without future notice,
+	 *
+	 * @param int $item_id Order item ID.
+	 */
+	public static function queue_download_permissions_for_deleted_subscription_item( $item_id ) {
+		$item = WC_Order_Factory::get_order_item( $item_id );
+
+		if ( ! is_a( $item, 'WC_Order_Item_Product' ) ) {
+			return;
+		}
+
+		$subscription = wcs_get_subscription( $item->get_order_id() );
+
+		if ( ! $subscription ) {
+			return;
+		}
+
+		$product_id = wcs_get_canonical_product_id( $item );
+
+		if ( ! $product_id ) {
+			return;
+		}
+
+		if ( self::subscription_has_downloadable_product_item( $subscription, $product_id, $item->get_id() ) ) {
+			return;
+		}
+
+		/** @var WC_Customer_Download_Data_Store $data_store */
+		$data_store     = WC_Data_Store::load( 'customer-download' );
+		$permission_ids = $data_store->get_downloads(
+			array(
+				'order_id'   => $subscription->get_id(),
+				'product_id' => $product_id,
+				'return'     => 'ids',
+			)
+		);
+		$permission_ids = array_values( array_filter( array_map( 'absint', $permission_ids ) ) );
+
+		if ( empty( $permission_ids ) ) {
+			return;
+		}
+
+		$pending_revocations = $subscription->get_meta( self::PENDING_DOWNLOAD_PERMISSION_REVOCATIONS_META_KEY, true, 'edit' );
+		$pending_revocations = is_array( $pending_revocations ) ? $pending_revocations : array();
+		$queued_ids          = isset( $pending_revocations[ $product_id ] ) && is_array( $pending_revocations[ $product_id ] )
+			? array_map( 'absint', $pending_revocations[ $product_id ] )
+			: array();
+
+		$pending_revocations[ $product_id ] = array_values( array_unique( array_merge( $queued_ids, $permission_ids ) ) );
+		$subscription->update_meta_data( self::PENDING_DOWNLOAD_PERMISSION_REVOCATIONS_META_KEY, $pending_revocations );
+		$subscription->save_meta_data();
+	}
+
+	/**
+	 * Check if a subscription has another downloadable line item for a canonical product ID.
+	 *
+	 * @param WC_Subscription $subscription     Subscription object.
+	 * @param int             $product_id       Product ID.
+	 * @param int             $excluded_item_id Optional order item ID to ignore.
+	 *
+	 * @return bool
+	 */
+	private static function subscription_has_downloadable_product_item( $subscription, $product_id, $excluded_item_id = 0 ) {
+		foreach ( $subscription->get_items() as $item_id => $item ) {
+			/** @var WC_Order_Item_Product $item */
+			if ( $excluded_item_id && absint( $item_id ) === absint( $excluded_item_id ) ) {
+				continue;
+			}
+
+			if ( absint( $product_id ) === absint( wcs_get_canonical_product_id( $item ) ) ) {
+				$product = $item->get_product();
+
+				return $product && $product->exists() && $product->is_downloadable();
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Check if a product is still linked to a subscription line item.
+	 *
+	 * @param WC_Subscription $subscription Subscription object.
+	 * @param int             $product_id   Downloadable product ID.
+	 *
+	 * @return bool
+	 */
+	private static function subscription_has_linked_download( $subscription, $product_id ) {
+		if (
+			! class_exists( 'WC_Subscription_Downloads' )
+			|| ! class_exists( 'WC_Subscription_Downloads_Settings' )
+			|| ! WC_Subscription_Downloads_Settings::is_enabled()
+		) {
+			return false;
+		}
+
+		$product = wc_get_product( $product_id );
+
+		if ( ! $product || ! $product->exists() || ! $product->is_downloadable() ) {
+			return false;
+		}
+
+		// Mirror the linked-downloads feature's own status gate (@see WC_Subscription_Downloads_Products::assess_downloadable_product_status()):
+		// permissions for non-public products are revoked, and re-granted on republish, by that feature's
+		// status-transition sync, so only a publicly visible product still confers a linked entitlement here.
+		$status_object = get_post_status_object( $product->get_status() );
+
+		if ( ! $status_object || ! $status_object->public ) {
+			return false;
+		}
+
+		foreach ( $subscription->get_items() as $item ) {
+			/** @var WC_Order_Item_Product $item */
+			$linked_product_ids = WC_Subscription_Downloads::get_downloadable_products( $item->get_product_id(), $item->get_variation_id() );
+
+			foreach ( $linked_product_ids as $linked_product_id ) {
+				if ( absint( $product_id ) === absint( $linked_product_id ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Revoke queued permissions that no longer represent a current subscription entitlement.
+	 *
+	 * @param WC_Subscription $subscription Subscription object.
+	 */
+	private static function revoke_pending_download_permissions( $subscription ) {
+		$pending_revocations = $subscription->get_meta( self::PENDING_DOWNLOAD_PERMISSION_REVOCATIONS_META_KEY, true, 'edit' );
+
+		if ( empty( $pending_revocations ) ) {
+			return;
+		}
+
+		if ( ! is_array( $pending_revocations ) ) {
+			$subscription->delete_meta_data( self::PENDING_DOWNLOAD_PERMISSION_REVOCATIONS_META_KEY );
+			$subscription->save_meta_data();
+			return;
+		}
+
+		/** @var WC_Customer_Download_Data_Store $data_store */
+		$data_store = WC_Data_Store::load( 'customer-download' );
+
+		foreach ( $pending_revocations as $product_id => $permission_ids ) {
+			$product_id = absint( $product_id );
+
+			if (
+				! $product_id
+				|| self::subscription_has_downloadable_product_item( $subscription, $product_id )
+				|| self::subscription_has_linked_download( $subscription, $product_id )
+			) {
+				continue;
+			}
+
+			foreach ( array_unique( array_filter( array_map( 'absint', (array) $permission_ids ) ) ) as $permission_id ) {
+				$data_store->delete_by_id( $permission_id );
+			}
+		}
+
+		$subscription->delete_meta_data( self::PENDING_DOWNLOAD_PERMISSION_REVOCATIONS_META_KEY );
+		$subscription->save_meta_data();
 	}
 
 	/**
@@ -113,6 +294,35 @@ class WCS_Download_Handler {
 		$format = array( '%d', '%d', '%d' );
 
 		return $wpdb->delete( $table, $where, $format );
+	}
+
+	/**
+	 * Revokes a product's download permissions on a subscription, whichever user holds them.
+	 *
+	 * The subscription's customer is not always the user a permission belongs to. A gifted subscription's
+	 * permissions are granted to its recipient, and may later be held by a former recipient or by a user an
+	 * administrator granted access to.
+	 *
+	 * @since 9.3.0
+	 *
+	 * @param int             $product_id   The ID for the product (the downloadable file).
+	 * @param WC_Subscription $subscription The subscription the permissions were granted against.
+	 */
+	public static function revoke_subscription_download_permissions( $product_id, $subscription ) {
+		global $wpdb;
+
+		if ( ! $subscription instanceof WC_Subscription ) {
+			return;
+		}
+
+		$wpdb->delete(
+			$wpdb->prefix . 'woocommerce_downloadable_product_permissions',
+			array(
+				'product_id' => $product_id,
+				'order_id'   => $subscription->get_id(),
+			),
+			array( '%d', '%d' )
+		);
 	}
 
 	/**

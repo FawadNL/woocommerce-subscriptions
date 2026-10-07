@@ -16,6 +16,13 @@ class WC_Subscription_Downloads_Products {
 	public const RELATIONSHIP_VAR_SUB_TO_DOWNLOAD = 'var-sub-to-download';
 
 	/**
+	 * Whether this request has already reported a refused relationship change.
+	 *
+	 * @var bool
+	 */
+	private bool $refusal_reported = false;
+
+	/**
 	 * Products actions.
 	 *
 	 * @since 9.2.0 Added the `$register_hooks` parameter.
@@ -186,6 +193,108 @@ class WC_Subscription_Downloads_Products {
 	}
 
 	/**
+	 * Determines whether the current user may edit a product involved in a relationship save.
+	 *
+	 * A variation is authorized through its parent product. 'product_variation' is registered without map_meta_cap,
+	 * so 'edit_product' against a variation id collapses to the primitive capability and the id itself is never
+	 * consulted: the check reads as object-scoped while behaving like a role check. Authorizing the parent, which is
+	 * a 'product', restores the object scope.
+	 *
+	 * @since 9.3.0
+	 *
+	 * @param WC_Product $product Product or variation.
+	 *
+	 * @return bool
+	 */
+	private function current_user_can_edit_product( WC_Product $product ): bool {
+		$authorize_against = 'product_variation' === get_post_type( $product->get_id() ) ? $product->get_parent_id() : $product->get_id();
+
+		return $authorize_against > 0 && current_user_can( 'edit_product', $authorize_against );
+	}
+
+	/**
+	 * Reduces a submitted set of relationship ids to the changes the current user is authorized to make.
+	 *
+	 * Each id names a second product the save acts on, and linking or unlinking one grants or revokes download
+	 * permissions for every customer already subscribed against it. Filtering the submitted set alone is not enough:
+	 * an id the user cannot edit would drop out of the set, the diff would read that as a removal, and the guard
+	 * would revoke a subscriber's downloads. Ids the user cannot edit therefore keep the state they already have.
+	 *
+	 * An id that names no product is a different case. Nothing can be granted or revoked through it, so it is
+	 * dropped rather than preserved: that keeps a stored row for a since-deleted product clearable, as it was
+	 * before these checks existed.
+	 *
+	 * @since 9.3.0
+	 *
+	 * @param int[] $submitted Relationship ids posted with the save.
+	 * @param int[] $current   Relationship ids currently stored against the product being saved.
+	 *
+	 * @return int[] Relationship ids to store.
+	 */
+	private function authorized_relationship_ids( array $submitted, array $current ): array {
+		$submitted  = array_map( 'intval', $submitted );
+		$current    = array_map( 'intval', $current );
+		$authorized = array();
+		$refused    = false;
+
+		foreach ( $submitted as $id ) {
+			$product = wc_get_product( $id );
+
+			if ( ! $product ) {
+				continue;
+			}
+
+			if ( $this->current_user_can_edit_product( $product ) ) {
+				$authorized[] = $id;
+			} elseif ( ! in_array( $id, $current, true ) ) {
+				$refused = true;
+			}
+		}
+
+		foreach ( $current as $id ) {
+			$product = wc_get_product( $id );
+
+			if ( ! $product || $this->current_user_can_edit_product( $product ) ) {
+				continue;
+			}
+
+			$authorized[] = $id;
+
+			if ( ! in_array( $id, $submitted, true ) ) {
+				$refused = true;
+			}
+		}
+
+		if ( $refused ) {
+			$this->report_refused_relationship_changes();
+		}
+
+		return array_values( array_unique( $authorized ) );
+	}
+
+	/**
+	 * Tells the user that part of the change they submitted was refused. Reports once per request.
+	 *
+	 * @since 9.3.0
+	 *
+	 * @return void
+	 */
+	private function report_refused_relationship_changes(): void {
+		// The relationship ids only arrive with an editor form post, but the save hooks this runs on also fire from
+		// REST, WP-CLI and cron, where wcs_add_admin_notice() is not loaded.
+		if ( $this->refusal_reported || ! function_exists( 'wcs_add_admin_notice' ) ) {
+			return;
+		}
+
+		$this->refusal_reported = true;
+
+		wcs_add_admin_notice(
+			__( 'Some of the linked products could not be changed, because you do not have permission to edit them. Those links were left as they were.', 'woocommerce-subscriptions' ),
+			'error'
+		);
+	}
+
+	/**
 	 * Handle save for downloadable products (simple or variation).
 	 * These products link TO subscription products.
 	 *
@@ -200,22 +309,32 @@ class WC_Subscription_Downloads_Products {
 			return;
 		}
 
+		// The submitted ids are only as trustworthy as the product they hang off, and WooCommerce's variation save
+		// path checks a class-level capability rather than this variation before firing our hooks. The status sync
+		// at the end of this method is deliberately outside the check: it runs on every save, including unattended
+		// ones with no current user.
+		$can_edit_product = $this->current_user_can_edit_product( $product );
+
 		// phpcs:disable WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
 		if (
-			isset( $_POST[ self::RELATIONSHIP_VAR_DOWNLOAD_TO_SUB . $product_id ] )
+			$can_edit_product
+			&& isset( $_POST[ self::RELATIONSHIP_VAR_DOWNLOAD_TO_SUB . $product_id ] )
 			&& wp_verify_nonce( $_POST[ self::RELATIONSHIP_VAR_DOWNLOAD_TO_SUB . $product_id ], self::EDITOR_UPDATE )
 		) {
 			$subscription_ids = wc_clean( wp_unslash( $_POST['_variable_subscription_downloads_ids'][ $product_id ] ?? array() ) );
 			$subscription_ids = $this->sanitize_ids( $subscription_ids );
+			$subscription_ids = $this->authorized_relationship_ids( $subscription_ids, WC_Subscription_Downloads::get_subscriptions( $product_id ) );
 			$this->update_subscription_downloads( $product_id, $subscription_ids );
 		}
 
 		if (
-			isset( $_POST[ self::RELATIONSHIP_DOWNLOAD_TO_SUB ] )
+			$can_edit_product
+			&& isset( $_POST[ self::RELATIONSHIP_DOWNLOAD_TO_SUB ] )
 			&& wp_verify_nonce( $_POST[ self::RELATIONSHIP_DOWNLOAD_TO_SUB ], self::EDITOR_UPDATE )
 		) {
 			$subscription_ids = wc_clean( wp_unslash( $_POST['_subscription_downloads_ids'] ?? array() ) );
 			$subscription_ids = $this->sanitize_ids( $subscription_ids );
+			$subscription_ids = $this->authorized_relationship_ids( $subscription_ids, WC_Subscription_Downloads::get_subscriptions( $product_id ) );
 			$this->update_subscription_downloads( $product_id, $subscription_ids );
 		}
 
@@ -234,6 +353,14 @@ class WC_Subscription_Downloads_Products {
 	 * @return void
 	 */
 	private function handle_subscription_product_save( $product_id ) {
+		$product = wc_get_product( $product_id );
+
+		// As in handle_downloadable_product_save(): the submitted ids are only as trustworthy as the product they
+		// hang off. This handler does nothing but act on them, so an unauthorized save can stop here.
+		if ( ! $product || ! $this->current_user_can_edit_product( $product ) ) {
+			return;
+		}
+
 		// phpcs:disable WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
 		if (
 			isset( $_POST[ self::RELATIONSHIP_VAR_SUB_TO_DOWNLOAD . $product_id ] )
@@ -241,6 +368,7 @@ class WC_Subscription_Downloads_Products {
 		) {
 			$product_ids = wc_clean( wp_unslash( $_POST[ '_subscription_linked_downloadable_products_' . $product_id ] ?? array() ) );
 			$product_ids = $this->sanitize_ids( $product_ids );
+			$product_ids = $this->authorized_relationship_ids( $product_ids, WC_Subscription_Downloads::get_downloadable_products( $product_id ) );
 			$this->update_subscription_products( $product_id, $product_ids );
 			return;
 		}
@@ -251,6 +379,7 @@ class WC_Subscription_Downloads_Products {
 		) {
 			$product_ids = wc_clean( wp_unslash( (array) ( $_POST['_subscription_linked_downloadable_products'] ?? array() ) ) );
 			$product_ids = $this->sanitize_ids( $product_ids );
+			$product_ids = $this->authorized_relationship_ids( $product_ids, WC_Subscription_Downloads::get_downloadable_products( $product_id ) );
 			$this->update_subscription_products( $product_id, $product_ids );
 		}
 		// phpcs:enable
@@ -617,11 +746,18 @@ class WC_Subscription_Downloads_Products {
 					)
 				);
 
-				$orders = $this->get_orders( $subscription_id );
-				foreach ( $orders as $order_id ) {
-					$product   = wc_get_product( $product_id );
-					$downloads = $product->get_downloads();
+				$product = wc_get_product( $product_id );
 
+				// The row can name a product that has since been deleted. There are no files left to revoke access
+				// to, and the row itself is already gone.
+				if ( ! $product ) {
+					continue;
+				}
+
+				$downloads = $product->get_downloads();
+				$orders    = $this->get_orders( $subscription_id );
+
+				foreach ( $orders as $order_id ) {
 					// Adds the downloadable files to the order/subscription.
 					foreach ( array_keys( $downloads ) as $download_id ) {
 						$this->revoke_access_to_download( $download_id, $product_id, $order_id );
@@ -800,19 +936,31 @@ class WC_Subscription_Downloads_Products {
 	}
 
 	/**
-	 * Save simple product data.
+	 * Deprecated, do not use. Previously saved a simple product's linked subscription products.
+	 *
+	 * Unhooked in 8.3.0 alongside its two siblings, which were marked deprecated at the time while this one was
+	 * missed. It has no callers in this plugin.
+	 *
+	 * @deprecated 9.3.0
 	 *
 	 * @param  int $product_id
 	 *
 	 * @return void
 	 */
 	public function save_simple_product_data( $product_id ) {
+		wc_deprecated_function( __METHOD__, '9.3.0', __CLASS__ . '::handle_product_save' );
+
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing
 		$subscription_downloads_ids = ! empty( $_POST['_subscription_downloads_ids'] ) ? wc_clean( wp_unslash( $_POST['_subscription_downloads_ids'] ) ) : '';
 
 		if ( empty( $subscription_downloads_ids ) ) {
 			$subscription_downloads_ids = array();
 		}
+
+		$subscription_downloads_ids = $this->authorized_relationship_ids(
+			$this->sanitize_ids( $subscription_downloads_ids ),
+			WC_Subscription_Downloads::get_subscriptions( $product_id )
+		);
 
 		$this->update_subscription_downloads( $product_id, $subscription_downloads_ids );
 	}

@@ -351,22 +351,38 @@ class WCS_ATT_Manage_Add_Cart extends WCS_ATT_Abstract_Module {
 		$subscription_scheme_key = $subscription_scheme_obj->get_key();
 		$available_schemes       = WCS_ATT_Manage_Add::get_schemes_matching_cart();
 
-		foreach ( WC()->cart->cart_contents as $cart_item_key => $cart_item ) {
+		// Plans created since 9.0.0 are keyed by an id rather than by their billing schedule, so the cart's plan
+		// cannot be looked up under the dummy scheme's key. Find it by billing schedule instead, which is the test the
+		// list of subscriptions offered to the customer was built with. A cart item without a selected plan offers all
+		// of its product's plans, and two of those may share a schedule; choosing between them would apply pricing
+		// the customer never picked, so that case is refused below, the same as no match at all.
+		$matching_scheme_keys = array();
 
-			// If we are adding a product with subscription plans to an existing subscription, use existing scheme to benefit from the discount!
-			if ( ! is_null( $available_schemes ) && isset( $available_schemes[ $subscription_scheme_key ] ) ) {
-				$subscription_scheme = array( $subscription_scheme_key => $available_schemes[ $subscription_scheme_key ] );
-
-				// Otherwise, if we are adding a one-time product to a subscription, apply dummy subscription scheme.
-			} else {
-				$subscription_scheme = array( $subscription_scheme_key => $subscription_scheme_obj );
+		if ( is_array( $available_schemes ) ) {
+			foreach ( $available_schemes as $scheme_key => $scheme ) {
+				if ( $scheme instanceof WCS_ATT_Scheme && $scheme->matches_subscription( $subscription ) ) {
+					$matching_scheme_keys[] = $scheme_key;
+				}
 			}
-
-			WCS_ATT_Product_Schemes::set_subscription_schemes( WC()->cart->cart_contents[ $cart_item_key ]['data'], $subscription_scheme );
-			WCS_ATT_Product_Schemes::set_subscription_scheme( WC()->cart->cart_contents[ $cart_item_key ]['data'], $subscription_scheme_key );
 		}
 
-		if ( ! is_null( $available_schemes ) && ( ! isset( $available_schemes[ $subscription_scheme_key ] ) || ! WC_Subscriptions_Cart::cart_contains_subscription() || ! $subscription_scheme_obj->matches_subscription( $subscription ) ) ) {
+		// If we are adding a product with subscription plans to an existing subscription, use existing scheme to benefit from the discount!
+		if ( 1 === count( $matching_scheme_keys ) ) {
+			$applied_scheme_key = current( $matching_scheme_keys );
+			$applied_schemes    = array( $applied_scheme_key => $available_schemes[ $applied_scheme_key ] );
+
+			// Otherwise, if we are adding a one-time product to a subscription, apply dummy subscription scheme.
+		} else {
+			$applied_scheme_key = $subscription_scheme_key;
+			$applied_schemes    = array( $subscription_scheme_key => $subscription_scheme_obj );
+		}
+
+		foreach ( WC()->cart->cart_contents as $cart_item_key => $cart_item ) {
+			WCS_ATT_Product_Schemes::set_subscription_schemes( WC()->cart->cart_contents[ $cart_item_key ]['data'], $applied_schemes );
+			WCS_ATT_Product_Schemes::set_subscription_scheme( WC()->cart->cart_contents[ $cart_item_key ]['data'], $applied_scheme_key );
+		}
+
+		if ( ! is_null( $available_schemes ) && ( 1 !== count( $matching_scheme_keys ) || ! WC_Subscriptions_Cart::cart_contains_subscription() || ! $subscription_scheme_obj->matches_subscription( $subscription ) ) ) {
 			wc_add_notice( sprintf( __( 'Your cart cannot be added to subscription #%d. Please get in touch with us for assistance.', 'woocommerce-subscriptions' ), $subscription_id ), 'error' );
 			return;
 		}

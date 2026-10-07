@@ -159,7 +159,7 @@ class Orders {
 						COUNT(*) as count,
 						SUM(orders.total_amount) as gross
 
-					FROM %i AS orders
+					FROM $this->wc_orders_table AS orders
 					WHERE orders.type = 'shop_order'
 
 						-- Only include successful order statuses (excludes on-hold, pending, failed, etc.)
@@ -174,26 +174,26 @@ class Orders {
 							-- Parent orders (orders that created subscriptions)
 							orders.id IN (
 								SELECT DISTINCT parent_order_id
-								FROM %i AS subscriptions
+								FROM $this->wc_orders_table AS subscriptions
 								WHERE subscriptions.type = 'shop_subscription'
 								AND subscriptions.parent_order_id IS NOT NULL
 								AND subscriptions.parent_order_id <> 0
 							)
 							-- Renewal orders (recurring subscription payments)
 							OR EXISTS (
-								SELECT 1 FROM %i AS renewal_meta
+								SELECT 1 FROM $this->wc_orders_meta_table AS renewal_meta
 								WHERE renewal_meta.order_id = orders.id
 								AND renewal_meta.meta_key = '_subscription_renewal'
 							)
 							-- Switch orders (subscription plan/product changes)
 							OR EXISTS (
-								SELECT 1 FROM %i AS switch_meta
+								SELECT 1 FROM $this->wc_orders_meta_table AS switch_meta
 								WHERE switch_meta.order_id = orders.id
 								AND switch_meta.meta_key = '_subscription_switch'
 							)
 							-- Resubscribe orders (reactivated cancelled subscriptions)
 							OR EXISTS (
-								SELECT 1 FROM %i AS resubscribe_meta
+								SELECT 1 FROM $this->wc_orders_meta_table AS resubscribe_meta
 								WHERE resubscribe_meta.order_id = orders.id
 								AND resubscribe_meta.meta_key = '_subscription_resubscribe'
 							)
@@ -205,13 +205,8 @@ class Orders {
                     -- Sort by payment method, then by month
 					ORDER BY payment_method ASC, month ASC
 				",
-				$this->wc_orders_table, // main FROM table
 				$start_date,
-				$end_date,
-				$this->wc_orders_table, // WHERE parent orders subquery
-				$this->wc_orders_meta_table, // WHERE renewal orders subquery
-				$this->wc_orders_meta_table, // WHERE switch orders subquery
-				$this->wc_orders_meta_table // WHERE resubscribe orders subquery
+				$end_date
 			)
 		);
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -243,15 +238,15 @@ class Orders {
 						COUNT(*) as count,
 						SUM(total_meta.meta_value) as gross
 
-					FROM %i AS orders
+					FROM $wpdb->posts AS orders
 					-- Join payment method from order meta
-					LEFT JOIN %i AS payment_meta ON (
+					LEFT JOIN $wpdb->postmeta AS payment_meta ON (
 						orders.ID = payment_meta.post_id
 						AND payment_meta.meta_key = '_payment_method'
 					)
 
 					-- Join order total from order meta
-					LEFT JOIN %i AS total_meta ON (
+					LEFT JOIN $wpdb->postmeta AS total_meta ON (
 						orders.ID = total_meta.post_id
 						AND total_meta.meta_key = '_order_total'
 					)
@@ -269,26 +264,26 @@ class Orders {
 							-- Parent orders (orders that created subscriptions)
 							orders.ID IN (
 								SELECT DISTINCT post_parent
-								FROM %i AS subscriptions
+								FROM $wpdb->posts AS subscriptions
 								WHERE subscriptions.post_type = 'shop_subscription'
 								AND subscriptions.post_parent IS NOT NULL
 								AND subscriptions.post_parent <> 0
 							)
 							-- Renewal orders (recurring subscription payments)
 							OR EXISTS (
-								SELECT 1 FROM %i AS renewal_meta
+								SELECT 1 FROM $wpdb->postmeta AS renewal_meta
 								WHERE renewal_meta.post_id = orders.ID
 								AND renewal_meta.meta_key = '_subscription_renewal'
 							)
 							-- Switch orders (subscription plan/product changes)
 							OR EXISTS (
-								SELECT 1 FROM %i AS switch_meta
+								SELECT 1 FROM $wpdb->postmeta AS switch_meta
 								WHERE switch_meta.post_id = orders.ID
 								AND switch_meta.meta_key = '_subscription_switch'
 							)
 							-- Resubscribe orders (reactivated cancelled subscriptions)
 							OR EXISTS (
-								SELECT 1 FROM %i AS resubscribe_meta
+								SELECT 1 FROM $wpdb->postmeta AS resubscribe_meta
 								WHERE resubscribe_meta.post_id = orders.ID
 								AND resubscribe_meta.meta_key = '_subscription_resubscribe'
 							)
@@ -300,15 +295,8 @@ class Orders {
 					-- Sort by payment method, then by month
 					ORDER BY payment_method ASC, month ASC
 				",
-				$wpdb->posts, // main FROM table
-				$wpdb->postmeta, // LEFT JOIN payment_meta
-				$wpdb->postmeta, // LEFT JOIN total_meta
 				$start_date,
-				$end_date,
-				$wpdb->posts, // WHERE parent orders subquery
-				$wpdb->postmeta, // WHERE renewal orders subquery
-				$wpdb->postmeta, // WHERE switch orders subquery
-				$wpdb->postmeta // WHERE resubscribe orders subquery
+				$end_date
 			)
 		);
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -512,10 +500,10 @@ class Orders {
 						COUNT(*) as count,
 						SUM(orders.total_amount) as gross,
 						SUM(CASE WHEN orders.total_amount > 0 THEN 1 ELSE 0 END) as non_zero_count
-					FROM %i AS orders
+					FROM $this->wc_orders_table AS orders
 
 					-- Join order type meta
-					INNER JOIN %i AS order_type_meta ON (
+					INNER JOIN $this->wc_orders_meta_table AS order_type_meta ON (
 						order_type_meta.order_id = orders.id
 						AND order_type_meta.meta_key IN ('_subscription_renewal', '_subscription_switch', '_subscription_resubscribe')
 					)
@@ -532,8 +520,6 @@ class Orders {
 					GROUP BY order_type_meta.meta_key, YEAR(orders.date_created_gmt), MONTH(orders.date_created_gmt)
 					ORDER BY order_type_meta.meta_key ASC, month ASC
 				",
-				$this->wc_orders_table, // FROM %i AS orders
-				$this->wc_orders_meta_table, // INNER JOIN %i AS order_type_meta
 				$start_date, // AND orders.date_created_gmt >= %s
 				$end_date // AND orders.date_created_gmt < %s
 			)
@@ -562,16 +548,16 @@ class Orders {
 						COUNT(*) as count,
 						SUM(total_meta.meta_value) as gross,
 						SUM(CASE WHEN total_meta.meta_value > 0 THEN 1 ELSE 0 END) as non_zero_count
-					FROM %i AS orders
+					FROM $wpdb->posts AS orders
 
 					-- Join order type meta
-					INNER JOIN %i AS order_type_meta ON (
+					INNER JOIN $wpdb->postmeta AS order_type_meta ON (
 						order_type_meta.post_id = orders.ID
 						AND order_type_meta.meta_key IN ('_subscription_renewal', '_subscription_switch', '_subscription_resubscribe')
 					)
 
 					-- Join order total from order meta
-					LEFT JOIN %i AS total_meta ON (
+					LEFT JOIN $wpdb->postmeta AS total_meta ON (
 						orders.ID = total_meta.post_id
 						AND total_meta.meta_key = '_order_total'
 					)
@@ -588,9 +574,6 @@ class Orders {
 					GROUP BY order_type_meta.meta_key, YEAR(orders.post_date_gmt), MONTH(orders.post_date_gmt)
 					ORDER BY order_type_meta.meta_key ASC, month ASC
 				",
-				$wpdb->posts, // FROM %i AS orders
-				$wpdb->postmeta, // INNER JOIN %i AS order_type_meta
-				$wpdb->postmeta, // LEFT JOIN %i AS total_meta
 				$start_date, // AND orders.post_date_gmt >= %s
 				$end_date // AND orders.post_date_gmt < %s
 			)
@@ -682,7 +665,7 @@ class Orders {
 						COUNT(*) as count,
 						SUM(orders.total_amount) as gross,
 						SUM(CASE WHEN orders.total_amount > 0 THEN 1 ELSE 0 END) as non_zero_count
-					FROM %i AS orders
+					FROM $this->wc_orders_table AS orders
 					WHERE orders.type = 'shop_order'
 
 						-- Only include successful order statuses
@@ -695,7 +678,7 @@ class Orders {
 						-- Parent orders (orders that created subscriptions)
 						AND orders.id IN (
 							SELECT DISTINCT parent_order_id
-							FROM %i AS subscriptions
+							FROM $this->wc_orders_table AS subscriptions
 							WHERE subscriptions.type = 'shop_subscription'
 							AND subscriptions.parent_order_id IS NOT NULL
 							AND subscriptions.parent_order_id <> 0
@@ -704,10 +687,8 @@ class Orders {
 					GROUP BY YEAR(orders.date_created_gmt), MONTH(orders.date_created_gmt)
 					ORDER BY month ASC
 				",
-				$this->wc_orders_table, // FROM %i AS orders
 				$start_date, // AND orders.date_created_gmt >= %s
-				$end_date, // AND orders.date_created_gmt < %s
-				$this->wc_orders_table // SELECT DISTINCT parent_order_id FROM %i AS subscriptions
+				$end_date // AND orders.date_created_gmt < %s
 			)
 		);
 
@@ -719,22 +700,22 @@ class Orders {
 						DATE_FORMAT(orders.date_created_gmt, '%%Y-%%m') as month,
 						SUM(CAST(wcoimeta.meta_value AS DECIMAL(10,2))) as total_quantity,
 						SUM( IF( orders.total_amount > 0, CAST( wcoimeta.meta_value AS DECIMAL( 10,2 ) ), 0 ) ) as non_zero_quantity
-					FROM %i AS orders
+					FROM $this->wc_orders_table AS orders
 
 					-- Join to subscriptions: Only include orders that created subscriptions (parent orders)
-					INNER JOIN %i AS subscriptions ON (
+					INNER JOIN $this->wc_orders_table AS subscriptions ON (
 						subscriptions.parent_order_id = orders.id
 						AND subscriptions.type = 'shop_subscription'
 					)
 
 					-- Join to order items: Get all line items for each parent order
-					INNER JOIN %i AS wcoitems ON (
+					INNER JOIN {$wpdb->prefix}woocommerce_order_items AS wcoitems ON (
 						orders.id = wcoitems.order_id
 						AND wcoitems.order_item_type = 'line_item'
 					)
 
 					-- Join to item metadata: Get quantity values for each line item
-					INNER JOIN %i AS wcoimeta ON (
+					INNER JOIN {$wpdb->prefix}woocommerce_order_itemmeta AS wcoimeta ON (
 						wcoitems.order_item_id = wcoimeta.order_item_id
 						AND wcoimeta.meta_key = '_qty'
 					)
@@ -750,10 +731,6 @@ class Orders {
 					GROUP BY YEAR(orders.date_created_gmt), MONTH(orders.date_created_gmt)
 					ORDER BY month ASC
 				",
-				$this->wc_orders_table, // FROM %i AS orders
-				$this->wc_orders_table, // INNER JOIN %i AS subscriptions
-				$wpdb->prefix . 'woocommerce_order_items', // INNER JOIN %i AS wcoitems
-				$wpdb->prefix . 'woocommerce_order_itemmeta', // INNER JOIN %i AS wcoimeta
 				$start_date, // AND orders.date_created_gmt >= %s
 				$end_date // AND orders.date_created_gmt < %s
 			)
@@ -788,10 +765,10 @@ class Orders {
 						COUNT(*) as count,
 						SUM(total_meta.meta_value) as gross,
 						SUM(CASE WHEN total_meta.meta_value > 0 THEN 1 ELSE 0 END) as non_zero_count
-					FROM %i AS orders
+					FROM $wpdb->posts AS orders
 
 					-- Join order total from order meta
-					LEFT JOIN %i AS total_meta ON (
+					LEFT JOIN $wpdb->postmeta AS total_meta ON (
 						orders.ID = total_meta.post_id
 						AND total_meta.meta_key = '_order_total'
 					)
@@ -807,7 +784,7 @@ class Orders {
 						-- Parent orders (orders that created subscriptions)
 						AND orders.ID IN (
 							SELECT DISTINCT post_parent
-							FROM %i AS subscriptions
+							FROM $wpdb->posts AS subscriptions
 							WHERE subscriptions.post_type = 'shop_subscription'
 							AND subscriptions.post_parent IS NOT NULL
 							AND subscriptions.post_parent <> 0
@@ -816,11 +793,8 @@ class Orders {
 					GROUP BY YEAR(orders.post_date_gmt), MONTH(orders.post_date_gmt)
 					ORDER BY month ASC
 				",
-				$wpdb->posts, // FROM %i AS orders
-				$wpdb->postmeta, // LEFT JOIN %i AS total_meta
 				$start_date, // AND orders.post_date_gmt >= %s
-				$end_date, // AND orders.post_date_gmt < %s
-				$wpdb->posts // SELECT DISTINCT post_parent FROM %i AS subscriptions
+				$end_date // AND orders.post_date_gmt < %s
 			)
 		);
 
@@ -832,28 +806,28 @@ class Orders {
 						DATE_FORMAT(orders.post_date_gmt, '%%Y-%%m') as month,
 						SUM(CAST(wcoimeta.meta_value AS DECIMAL(10,2))) as total_quantity,
 						SUM( IF( total_meta.meta_value > 0, CAST( wcoimeta.meta_value AS DECIMAL( 10,2 ) ), 0 ) ) as non_zero_quantity
-					FROM %i AS orders
+					FROM $wpdb->posts AS orders
 
 					-- Join to subscriptions: Only include orders that created subscriptions (parent orders)
-					INNER JOIN %i AS subscriptions ON (
+					INNER JOIN $wpdb->posts AS subscriptions ON (
 						subscriptions.post_parent = orders.ID
 						AND subscriptions.post_type = 'shop_subscription'
 					)
 
 					-- Join order total from order meta
-					LEFT JOIN %i AS total_meta ON (
+					LEFT JOIN $wpdb->postmeta AS total_meta ON (
 						orders.ID = total_meta.post_id
 						AND total_meta.meta_key = '_order_total'
 					)
 
 					-- Join to order items: Get all line items for each parent order
-					INNER JOIN %i AS wcoitems ON (
+					INNER JOIN {$wpdb->prefix}woocommerce_order_items AS wcoitems ON (
 						orders.ID = wcoitems.order_id
 						AND wcoitems.order_item_type = 'line_item'
 					)
 
 					-- Join to item metadata: Get quantity values for each line item
-					INNER JOIN %i AS wcoimeta ON (
+					INNER JOIN {$wpdb->prefix}woocommerce_order_itemmeta AS wcoimeta ON (
 						wcoitems.order_item_id = wcoimeta.order_item_id
 						AND wcoimeta.meta_key = '_qty'
 					)
@@ -869,11 +843,6 @@ class Orders {
 					GROUP BY YEAR(orders.post_date_gmt), MONTH(orders.post_date_gmt)
 					ORDER BY month ASC
 				",
-				$wpdb->posts, // FROM %i AS orders
-				$wpdb->posts, // INNER JOIN %i AS subscriptions
-				$wpdb->postmeta, // LEFT JOIN %i AS total_meta
-				$wpdb->prefix . 'woocommerce_order_items', // INNER JOIN %i AS wcoitems
-				$wpdb->prefix . 'woocommerce_order_itemmeta', // INNER JOIN %i AS wcoimeta
 				$start_date, // AND orders.post_date_gmt >= %s
 				$end_date // AND orders.post_date_gmt < %s
 			)
@@ -921,7 +890,7 @@ class Orders {
 					SELECT
 						DATE_FORMAT(orders.date_created_gmt, '%%Y-%%m') as month,
 						SUM(orders.total_amount) as gross
-					FROM %i AS orders
+					FROM $this->wc_orders_table AS orders
 					WHERE orders.type = 'shop_order'
 						AND orders.status IN ( $this->active_order_statuses_clause )
 						AND orders.date_created_gmt >= %s
@@ -929,12 +898,11 @@ class Orders {
 					GROUP BY YEAR(orders.date_created_gmt), MONTH(orders.date_created_gmt)
 					ORDER BY month ASC
 				",
-				$this->wc_orders_table,
 				$start_date,
 				$end_date
 			)
 		);
-		// phpcs:enable phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	}
 
 	/**
@@ -955,8 +923,8 @@ class Orders {
 					SELECT
 						DATE_FORMAT(orders.post_date_gmt, '%%Y-%%m') as month,
 						SUM(order_meta.meta_value) as gross
-					FROM      %i AS orders
-					LEFT JOIN %i AS order_meta ON order_meta.post_id = orders.ID
+					FROM      $wpdb->posts AS orders
+					LEFT JOIN $wpdb->postmeta AS order_meta ON order_meta.post_id = orders.ID
 					WHERE     order_meta.meta_key = '_order_total'
 					          AND orders.post_status IN ( $this->active_order_statuses_clause )
 					          AND orders.post_date_gmt >= %s
@@ -964,8 +932,6 @@ class Orders {
 					GROUP BY YEAR(orders.post_date_gmt), MONTH(orders.post_date_gmt)
 					ORDER BY month ASC
 				",
-				$wpdb->posts,
-				$wpdb->postmeta,
 				$start_date,
 				$end_date
 			)

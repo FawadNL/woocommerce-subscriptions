@@ -99,7 +99,7 @@ class WCS_PayPal_Reference_Transaction_IPN_Handler extends WCS_PayPal_Standard_I
 			// Cancel PayPal subscriptions which haven't ended yet.
 			if ( $is_paypal_subscription && ! $subscription->has_status( wcs_get_subscription_ended_statuses() ) ) {
 				try {
-					$subscription->cancel_order( $note );
+					$subscription->maybe_cancel( $note );
 					WC_Gateway_Paypal::log( sprintf( 'Subscription %s Cancelled: %s', $subscription->get_id(), $note ) );
 				} catch ( Exception $e ) {
 					WC_Gateway_Paypal::log( sprintf( 'Unable to cancel subscription %s: %s', $subscription->get_id(), $e->getMessage() ) );
