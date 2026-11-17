@@ -52,7 +52,8 @@ build_failed() {
 progress_message "Verifying build folder against the source..."
 # A dry run lists every file whose content differs from the source or is missing from the build folder.
 SOURCE_DIFF_LIST="$BUILD_PATH/source-diff.txt"
-rsync -rcn --out-format='%n' --exclude-from=".distignore" . "$DEST_PATH/" > "$SOURCE_DIFF_LIST" \
+# The finished zip sits in the project root by now; it is not part of the plugin.
+rsync -rcn --out-format='%n' --exclude-from=".distignore" --exclude="/$PLUGIN_SLUG.zip" . "$DEST_PATH/" > "$SOURCE_DIFF_LIST" \
 || build_failed "could not compare the build folder with the source (rsync failed)."
 SOURCE_DIFF="$(grep -v '/$' "$SOURCE_DIFF_LIST" || true)"
 rm -f "$SOURCE_DIFF_LIST"
